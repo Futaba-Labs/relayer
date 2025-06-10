@@ -104,7 +104,7 @@ export class TransactionClient {
             error: stringifyThrownValue(error),
           });
           // Fall back to original provider
-          return runTransaction(this.logger, contract, method, args, value, gasLimit, nonce);
+          // return runTransaction(this.logger, contract, method, args, value, gasLimit, nonce);
         }
       }
     }
