@@ -12,6 +12,8 @@ import {
   TransactionSimulationResult,
   willSucceed,
   stringifyThrownValue,
+  CHAIN_IDs,
+  ethers,
 } from "../utils";
 
 export interface AugmentedTransaction {
@@ -41,9 +43,29 @@ const DEFAULT_GASLIMIT_MULTIPLIER = 1.0;
 
 export class TransactionClient {
   readonly nonces: { [chainId: number]: number } = {};
+  private mainnetTxProvider: ethers.providers.JsonRpcProvider | null = null;
 
   // eslint-disable-next-line no-useless-constructor
   constructor(readonly logger: winston.Logger) {}
+
+  private async getMainnetTxProvider(): Promise<ethers.providers.JsonRpcProvider | null> {
+    if (this.mainnetTxProvider) {
+      return this.mainnetTxProvider;
+    }
+
+    const mainnetTxUrl = process.env.RPC_PROVIDER_PRIVATE_1;
+    if (mainnetTxUrl) {
+      this.logger.debug({
+        at: "TransactionClient#getMainnetTxProvider",
+        message: "Creating dedicated mainnet transaction provider",
+        url: mainnetTxUrl.substring(0, 50) + "...", // Log partial URL for privacy
+      });
+      this.mainnetTxProvider = new ethers.providers.JsonRpcProvider(mainnetTxUrl);
+      return this.mainnetTxProvider;
+    }
+
+    return null;
+  }
 
   protected _simulate(txn: AugmentedTransaction): Promise<TransactionSimulationResult> {
     return willSucceed(txn);
@@ -55,8 +77,39 @@ export class TransactionClient {
     return Promise.all(txns.map((txn: AugmentedTransaction) => this._simulate(txn)));
   }
 
-  protected _submit(txn: AugmentedTransaction, nonce: number | null = null): Promise<TransactionResponse> {
-    const { contract, method, args, value, gasLimit } = txn;
+  protected async _submit(txn: AugmentedTransaction, nonce: number | null = null): Promise<TransactionResponse> {
+    const { contract, method, args, value, gasLimit, chainId } = txn;
+
+    // For mainnet transactions, use a separate RPC endpoint if configured
+    if (chainId === CHAIN_IDs.MAINNET) {
+      const mainnetTxProvider = await this.getMainnetTxProvider();
+      if (mainnetTxProvider) {
+        this.logger.debug({
+          at: "TransactionClient#_submit",
+          message: "Using dedicated mainnet RPC endpoint for transaction submission",
+          chainId,
+          method,
+        });
+
+        // Connect the signer to the mainnet transaction provider
+        const mainnetSigner = contract.signer.connect(mainnetTxProvider);
+        // Create a new contract instance with the mainnet transaction provider
+        const mainnetContract = new Contract(contract.address, contract.interface, mainnetSigner);
+        try {
+          return await runTransaction(this.logger, mainnetContract, method, args, value, gasLimit, nonce);
+        } catch (error) {
+          this.logger.warn({
+            at: "TransactionClient#_submit",
+            message: "Failed to submit transaction via mainnet TX RPC, falling back to standard provider",
+            error: stringifyThrownValue(error),
+          });
+          // Fall back to original provider
+          return runTransaction(this.logger, contract, method, args, value, gasLimit, nonce);
+        }
+      }
+    }
+
+    // Default behavior for non-mainnet chains or when no separate mainnet RPC is configured
     return runTransaction(this.logger, contract, method, args, value, gasLimit, nonce);
   }
 
