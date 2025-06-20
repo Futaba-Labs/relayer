@@ -147,8 +147,12 @@ export class Relayer {
       enableBackwardSearch: this.config.enableBackwardSearch,
     });
 
-    // Use enhanced update method if backward search is enabled
-    if (this.config.enableBackwardSearch) {
+    // Use enhanced update method if backward search is enabled for any chain
+    const hasBackwardSearchEnabled = Object.values(spokePoolClients).some(client => 
+      this.config.isBackwardSearchEnabledForChain(client.chainId)
+    );
+
+    if (hasBackwardSearchEnabled) {
       await this.updateSpokePoolClientsWithBackwardSearch(spokePoolClients);
     } else {
       await updateSpokePoolClients(spokePoolClients, [
@@ -172,44 +176,60 @@ export class Relayer {
   private async updateSpokePoolClientsWithBackwardSearch(spokePoolClients: any): Promise<void> {
     const eventsToQuery = ["FundsDeposited", "FilledRelay"];
     
-    // Determine search strategy based on configuration and current state
-    const useBackwardSearch = this.shouldUseBackwardSearch();
-    
     await Promise.all(
       Object.values(spokePoolClients).map(async (client: any) => {
+        const chainId = client.chainId;
+        const chainConfig = this.config.getBackwardSearchConfigForChain(chainId);
+        
         try {
-          if (client.updateWithBackwardSearch && (useBackwardSearch || this.config.useHybridSearch)) {
-            const searchOptions = {
-              useAdaptiveSearch: true,
-              lookbackBlocks: this.config.backwardSearchLookback,
-              maxEvents: this.config.backwardSearchMaxEvents,
-              maxSearchTimeMs: this.config.backwardSearchMaxTimeMs,
-            };
-
-            const result = await client.updateWithBackwardSearch(eventsToQuery, searchOptions);
+          // Check if backward search is enabled for this specific chain
+          if (chainConfig.enabled && client.updateWithBackwardSearch) {
+            // Determine search strategy based on chain config and current state
+            const useBackwardSearch = this.shouldUseBackwardSearchForChain(chainId);
             
-            if (result.backwardSearchResult) {
-              this.logger.debug({
-                at: "Relayer#updateSpokePoolClientsWithBackwardSearch",
-                message: "Backward search completed",
-                chainId: client.chainId,
-                searchMethod: result.searchMethod,
-                eventsFound: result.backwardSearchResult.events.length,
-                blocksSearched: result.backwardSearchResult.totalBlocksSearched,
-                cacheHits: result.backwardSearchResult.cacheHits,
-                searchTimeMs: result.backwardSearchResult.searchTimeMs,
-              });
+            if (useBackwardSearch || chainConfig.useHybridSearch) {
+              const searchOptions = {
+                useAdaptiveSearch: true,
+                lookbackBlocks: chainConfig.lookbackBlocks,
+                maxEvents: chainConfig.maxEvents,
+                maxSearchTimeMs: chainConfig.maxTimeMs,
+              };
+
+              const result = await client.updateWithBackwardSearch(eventsToQuery, searchOptions);
+              
+              if (result.backwardSearchResult) {
+                this.logger.debug({
+                  at: "Relayer#updateSpokePoolClientsWithBackwardSearch",
+                  message: "Backward search completed",
+                  chainId,
+                  searchMethod: result.searchMethod,
+                  eventsFound: result.backwardSearchResult.events.length,
+                  blocksSearched: result.backwardSearchResult.totalBlocksSearched,
+                  cacheHits: result.backwardSearchResult.cacheHits,
+                  searchTimeMs: result.backwardSearchResult.searchTimeMs,
+                  chainConfig: {
+                    lookbackBlocks: chainConfig.lookbackBlocks,
+                    maxEvents: chainConfig.maxEvents,
+                    chunkSize: chainConfig.chunkSize,
+                    useHybridSearch: chainConfig.useHybridSearch,
+                  },
+                });
+              }
+            } else {
+              // Backward search enabled but conditions don't warrant it
+              await client.update(eventsToQuery);
             }
           } else {
-            // Fall back to standard update
+            // Backward search not enabled for this chain, use standard update
             await client.update(eventsToQuery);
           }
         } catch (error) {
           this.logger.warn({
             at: "Relayer#updateSpokePoolClientsWithBackwardSearch",
             message: "Failed to update spoke pool client with backward search, falling back to standard update",
-            chainId: client.chainId,
-            error: error.message,
+            chainId,
+            error: error instanceof Error ? error.message : String(error),
+            chainConfig,
           });
           
           // Fallback to standard update
@@ -220,14 +240,39 @@ export class Relayer {
   }
 
   /**
-   * @description Determine whether to use backward search based on current conditions
+   * @description Determine whether to use backward search based on current conditions for a specific chain
    */
-  private shouldUseBackwardSearch(): boolean {
+  private shouldUseBackwardSearchForChain(chainId: number): boolean {
     // Use backward search when:
     // 1. This is the first update (updated === 1 after increment)
     // 2. It's been a while since the last update (connection issues)
     // 3. We're in startup phase and need to catch up quickly
     
+    const isFirstRun = this.updated === 1;
+    const timeSinceLastUpdate = getCurrentTime() - this.lastLogTime;
+    const isLongGap = timeSinceLastUpdate > 300; // 5 minutes
+    
+    const shouldUse = isFirstRun || isLongGap;
+    
+    if (shouldUse) {
+      this.logger.debug({
+        at: "Relayer#shouldUseBackwardSearchForChain",
+        message: "Using backward search",
+        chainId,
+        isFirstRun,
+        timeSinceLastUpdate,
+        isLongGap,
+      });
+    }
+    
+    return shouldUse;
+  }
+
+  /**
+   * @description Determine whether to use backward search based on current conditions (legacy method)
+   * @deprecated Use shouldUseBackwardSearchForChain instead
+   */
+  private shouldUseBackwardSearch(): boolean {
     const isFirstRun = this.updated === 1;
     const timeSinceLastUpdate = getCurrentTime() - this.lastLogTime;
     const isLongGap = timeSinceLastUpdate > 300; // 5 minutes

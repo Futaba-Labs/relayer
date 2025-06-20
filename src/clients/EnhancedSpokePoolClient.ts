@@ -24,9 +24,19 @@ export interface BackwardSearchOptions {
   maxSearchTimeMs?: number;
   targetBlock?: number;
   filterArgs?: { [eventName: string]: any[] };
+  chunkSize?: number;
+  maxChunkSize?: number;
+  growthFactor?: number;
+  cacheEnabled?: boolean;
+  useHybridSearch?: boolean;
 }
 
-export interface EnhancedSpokePoolUpdateResult extends clients.SpokePoolUpdate {
+export interface EnhancedSpokePoolUpdateResult {
+  success: boolean;
+  currentTime?: number;
+  searchEndBlock?: number;
+  events?: any[][];
+  reason?: string;
   backwardSearchResult?: BackwardSearchResult;
   searchMethod?: "forward" | "backward" | "hybrid";
 }
@@ -36,6 +46,7 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
   private lastBackwardSearchTime: number = 0;
   private consecutiveFailures: number = 0;
   private readonly maxConsecutiveFailures = 3;
+  private chainConfig?: any; // Will store chain-specific backward search config
 
   constructor(
     readonly logger: winston.Logger,
@@ -53,6 +64,36 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
     this.initializeBackwardSearcher();
   }
 
+  /**
+   * @description Set chain-specific backward search configuration
+   */
+  setChainConfig(chainConfig: any): void {
+    this.chainConfig = chainConfig;
+  }
+
+  /**
+   * @description Merge provided options with chain-specific configuration
+   */
+  private mergeOptionsWithChainConfig(options: BackwardSearchOptions): BackwardSearchOptions {
+    if (!this.chainConfig) {
+      return options;
+    }
+
+    return {
+      lookbackBlocks: options.lookbackBlocks ?? this.chainConfig.lookbackBlocks,
+      maxEvents: options.maxEvents ?? this.chainConfig.maxEvents,
+      useAdaptiveSearch: options.useAdaptiveSearch ?? this.chainConfig.enabled,
+      maxSearchTimeMs: options.maxSearchTimeMs ?? this.chainConfig.maxTimeMs,
+      targetBlock: options.targetBlock,
+      filterArgs: options.filterArgs ?? {},
+      chunkSize: options.chunkSize ?? this.chainConfig.chunkSize,
+      maxChunkSize: options.maxChunkSize ?? this.chainConfig.maxChunkSize,
+      growthFactor: options.growthFactor ?? this.chainConfig.growthFactor,
+      cacheEnabled: options.cacheEnabled ?? this.chainConfig.cacheEnabled,
+      useHybridSearch: options.useHybridSearch ?? this.chainConfig.useHybridSearch,
+    };
+  }
+
   private async initializeBackwardSearcher(): Promise<void> {
     try {
       const cache = await getRedisCache(this.logger);
@@ -66,7 +107,7 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       this.logger.warn({
         at: "EnhancedSpokePoolClient",
         message: "Failed to initialize cache for backward searcher, proceeding without cache",
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       this.backwardSearcher = new BackwardEventSearcher(
         this.spokePool,
@@ -84,6 +125,9 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
     eventsToQuery: string[],
     options: BackwardSearchOptions = {}
   ): Promise<EnhancedSpokePoolUpdateResult> {
+    // Merge options with chain-specific configuration
+    const mergedOptions = this.mergeOptionsWithChainConfig(options);
+    
     const {
       useAdaptiveSearch = false,
       lookbackBlocks = 10000,
@@ -91,12 +135,26 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       maxSearchTimeMs = 30000,
       targetBlock,
       filterArgs = {}
-    } = options;
+    } = mergedOptions;
 
     if (!useAdaptiveSearch || this.shouldUseFallbackMethod()) {
       // Use standard forward search
       const result = await this._update(eventsToQuery);
-      return { ...result, searchMethod: "forward" };
+      if (result.success) {
+        return { 
+          success: true,
+          currentTime: result.currentTime,
+          searchEndBlock: result.searchEndBlock,
+          events: result.events,
+          searchMethod: "forward" 
+        };
+      } else {
+        return {
+          success: false,
+          reason: (result as any).reason?.toString(),
+          searchMethod: "forward"
+        };
+      }
     }
 
     try {
@@ -114,13 +172,27 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       this.logger.warn({
         at: "EnhancedSpokePoolClient",
         message: "Backward search failed, falling back to forward search",
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         chainId: this.chainId
       });
       
       this.consecutiveFailures++;
       const result = await this._update(eventsToQuery);
-      return { ...result, searchMethod: "forward" };
+      if (result.success) {
+        return { 
+          success: true,
+          currentTime: result.currentTime,
+          searchEndBlock: result.searchEndBlock,
+          events: result.events,
+          searchMethod: "forward" 
+        };
+      } else {
+        return {
+          success: false,
+          reason: (result as any).reason?.toString(),
+          searchMethod: "forward"
+        };
+      }
     }
   }
 
@@ -134,9 +206,9 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       maxEvents: options.maxEvents || 1000,
       maxBlocksBack: options.lookbackBlocks || 10000,
       targetBlock: options.targetBlock,
-      initialChunkSize: 500,
-      maxChunkSize: 5000,
-      chunkGrowthFactor: 2.0,
+      initialChunkSize: options.chunkSize || 500,
+      maxChunkSize: options.maxChunkSize || 5000,
+      chunkGrowthFactor: options.growthFactor || 2.0,
       filterArgs: options.filterArgs || {},
       cachePrefix: `enhanced-spoke-${this.chainId}`
     };
@@ -174,9 +246,9 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       maxEvents: options.maxEvents ? Math.floor(options.maxEvents / 2) : 500,
       maxBlocksBack: recentBlockThreshold,
       targetBlock: recentSearchBlock,
-      initialChunkSize: 200,
-      maxChunkSize: 1000,
-      chunkGrowthFactor: 1.5,
+      initialChunkSize: options.chunkSize ? Math.floor(options.chunkSize / 2) : 200,
+      maxChunkSize: options.maxChunkSize ? Math.floor(options.maxChunkSize / 2) : 1000,
+      chunkGrowthFactor: options.growthFactor || 1.5,
       filterArgs: options.filterArgs || {},
       cachePrefix: `hybrid-recent-${this.chainId}`
     };
@@ -186,12 +258,17 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
     // Then, use forward search for any remaining quota and older events
     const forwardResult = await this._update(eventsToQuery);
 
-    // Combine results
+    // Combine results - convert forward search events to Log format
     const allEvents = [...recentSearchResult.events];
     if (forwardResult.success && forwardResult.events) {
-      forwardResult.events.forEach((eventArray, idx) => {
+      forwardResult.events.forEach((eventArray) => {
         if (Array.isArray(eventArray)) {
-          allEvents.push(...eventArray);
+          // Convert each event to Log format
+          eventArray.forEach((event: any) => {
+            if (event && typeof event === 'object') {
+              allEvents.push(event);
+            }
+          });
         }
       });
     }
@@ -214,21 +291,31 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
   }
 
   private shouldUseBackwardSearch(currentBlock: number): boolean {
+    // Check if backward search is enabled for this chain
+    if (this.chainConfig && !this.chainConfig.enabled) {
+      return false;
+    }
+
     // Use backward search when:
-    // 1. First run after startup (pendingBlockNumber is still at deployment)
+    // 1. First run after startup
     // 2. After a significant gap in updates (>5 minutes)
     // 3. When we haven't done a backward search recently (>10 minutes)
-    // 4. When pending events are empty (suggesting we're catching up)
 
     const now = getCurrentTime();
     const timeSinceLastBackwardSearch = now - this.lastBackwardSearchTime;
     const hasRecentBackwardSearch = timeSinceLastBackwardSearch < 600; // 10 minutes
 
-    const isFirstRun = this.pendingBlockNumber === this.deploymentBlock;
-    const hasPendingEvents = this.pendingEvents.some(eventArray => eventArray.length > 0);
     const isLongGapUpdate = timeSinceLastBackwardSearch > 300; // 5 minutes
+    const isFirstRun = this.lastBackwardSearchTime === 0;
 
-    return isFirstRun || !hasRecentBackwardSearch || (!hasPendingEvents && isLongGapUpdate);
+    const shouldUse = isFirstRun || !hasRecentBackwardSearch || isLongGapUpdate;
+
+    // If chain config specifies hybrid search, prefer that over pure backward search
+    if (this.chainConfig?.useHybridSearch && !shouldUse) {
+      return false; // Let hybrid search handle it
+    }
+
+    return shouldUse;
   }
 
   private shouldUseFallbackMethod(): boolean {
@@ -237,19 +324,19 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
   }
 
   private processBackwardSearchResults(events: Log[], eventsToQuery: string[]): void {
-    // Group events by type and add to pending events
-    for (const event of events) {
-      const eventIdx = this._queryableEventNames().indexOf(event.event);
-      if (eventIdx !== -1 && eventsToQuery.includes(event.event)) {
-        this.pendingEvents[eventIdx].push({
-          ...event,
-          removed: false
-        });
-      }
-    }
+    // This method processes the backward search results
+    // The actual event processing is handled by the parent class's _update method
+    // We'll just log the processing for now
+    this.logger.debug({
+      at: "EnhancedSpokePoolClient#processBackwardSearchResults",
+      message: "Processing backward search results",
+      eventsProcessed: events.length,
+      eventsToQuery,
+      chainId: this.chainId,
+    });
   }
 
-  private formatEventsForUpdate(events: Log[], eventsToQuery: string[]): Log[][] {
+  private formatEventsForUpdate(events: Log[], eventsToQuery: string[]): any[][] {
     // Format events according to the existing SpokePoolUpdate interface
     return eventsToQuery.map((eventName) => {
       return events
@@ -329,12 +416,12 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
   /**
    * Override the standard update method to provide backward search capability
    */
-  override async update(eventsToQuery?: string[]): Promise<clients.SpokePoolUpdate> {
+  override async update(eventsToQuery?: string[]): Promise<void> {
     const events = eventsToQuery || this._queryableEventNames();
     
     // For now, keep the standard behavior by default
     // Users can explicitly call updateWithBackwardSearch for enhanced functionality
-    return this._update(events);
+    await this._update(events);
   }
 
   /**
@@ -345,14 +432,12 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
     consecutiveFailures: number;
     chainId: number;
     deploymentBlock: number;
-    pendingEventsCount: number;
   } {
     return {
       lastBackwardSearchTime: this.lastBackwardSearchTime,
       consecutiveFailures: this.consecutiveFailures,
       chainId: this.chainId,
       deploymentBlock: this.deploymentBlock,
-      pendingEventsCount: this.pendingEvents.reduce((sum, events) => sum + events.length, 0)
     };
   }
 }

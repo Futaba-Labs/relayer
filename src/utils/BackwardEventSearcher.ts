@@ -3,7 +3,7 @@ import { Contract } from "ethers";
 import winston from "winston";
 import { Log } from "../interfaces";
 import { CachingMechanismInterface } from "../interfaces";
-import { getCurrentTime } from "./NetworkUtils";
+import { getCurrentTime } from "./SDKUtils";
 import { paginatedEventQuery } from "./EventUtils";
 
 export interface BackwardSearchConfig {
@@ -220,7 +220,7 @@ export class BackwardEventSearcher {
           eventName,
           fromBlock,
           toBlock,
-          error: error.message
+          error: error instanceof Error ? error.message : String(error)
         });
         
         // Retry with smaller range if it's a large range
@@ -237,7 +237,7 @@ export class BackwardEventSearcher {
             eventName,
             fromBlock,
             toBlock,
-            error: error.message
+            error: error instanceof Error ? error.message : String(error)
           });
         }
       }
@@ -252,7 +252,7 @@ export class BackwardEventSearcher {
     try {
       const cached = await this.cache.get(cacheKey);
       if (cached) {
-        const parsed = JSON.parse(cached);
+        const parsed = JSON.parse(cached as string);
         return Array.isArray(parsed) ? parsed : null;
       }
       return null;
@@ -261,7 +261,7 @@ export class BackwardEventSearcher {
         at: "BackwardEventSearcher",
         message: "Cache read failed",
         cacheKey,
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       return null;
     }
@@ -277,7 +277,7 @@ export class BackwardEventSearcher {
         at: "BackwardEventSearcher",
         message: "Cache write failed",
         cacheKey,
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
     }
   }
@@ -331,7 +331,7 @@ export class BackwardEventSearcher {
         at: "BackwardEventSearcher",
         message: "Failed to get block timestamp",
         blockNumber,
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
       // Return current time as fallback
       return getCurrentTime();

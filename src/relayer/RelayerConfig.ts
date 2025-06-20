@@ -26,6 +26,18 @@ type DepositConfirmationConfig = {
   minConfirmations: number;
 };
 
+type ChainBackwardSearchConfig = {
+  enabled: boolean;
+  lookbackBlocks: number;
+  maxEvents: number;
+  chunkSize: number;
+  maxChunkSize: number;
+  growthFactor: number;
+  cacheEnabled: boolean;
+  maxTimeMs: number;
+  useHybridSearch: boolean;
+};
+
 export class RelayerConfig extends CommonConfig {
   readonly externalListener: boolean;
   readonly listenerPath: { [chainId: number]: string } = {};
@@ -70,7 +82,7 @@ export class RelayerConfig extends CommonConfig {
   // SpokePoolClient update specific lookback time in seconds (default: 30 minutes)
   readonly spokePoolUpdateLookback: number;
 
-  // Backward event search configuration
+  // Backward event search configuration (global defaults)
   readonly enableBackwardSearch: boolean;
   readonly backwardSearchLookback: number;
   readonly backwardSearchMaxEvents: number;
@@ -81,7 +93,15 @@ export class RelayerConfig extends CommonConfig {
   readonly backwardSearchMaxTimeMs: number;
   readonly useHybridSearch: boolean;
 
+  // Per-chain backward search configuration
+  readonly backwardSearchConfigPerChain: { [chainId: number]: ChainBackwardSearchConfig } = {};
+
+  // Store environment for per-chain configuration loading
+  private readonly env: ProcessEnv;
+
   constructor(env: ProcessEnv) {
+    super(env);
+    this.env = env;
     const {
       RELAYER_ORIGIN_CHAINS,
       RELAYER_DESTINATION_CHAINS,
@@ -116,7 +136,6 @@ export class RelayerConfig extends CommonConfig {
       RELAYER_BACKWARD_SEARCH_MAX_TIME_MS,
       RELAYER_USE_HYBRID_SEARCH,
     } = env;
-    super(env);
 
     // External listeners are dependent on looping mode being configured.
     this.externalListener = this.pollingDelay > 0 && RELAYER_EXTERNAL_LISTENER === "true";
@@ -358,7 +377,7 @@ export class RelayerConfig extends CommonConfig {
     this.spokePoolUpdateLookback = Number(SPOKEPOOL_UPDATE_LOOKBACK) || Constants.DEFAULT_SPOKEPOOL_UPDATE_LOOKBACK;
     assert(this.spokePoolUpdateLookback > 0, "spokePoolUpdateLookback must be greater than 0");
 
-    // Initialize backward search configuration
+    // Initialize global backward search configuration (defaults)
     this.enableBackwardSearch = RELAYER_ENABLE_BACKWARD_SEARCH === "true";
     this.backwardSearchLookback = Number(RELAYER_BACKWARD_SEARCH_LOOKBACK) || 10000; // blocks
     this.backwardSearchMaxEvents = Number(RELAYER_BACKWARD_SEARCH_MAX_EVENTS) || 1000;
@@ -369,7 +388,7 @@ export class RelayerConfig extends CommonConfig {
     this.backwardSearchMaxTimeMs = Number(RELAYER_BACKWARD_SEARCH_MAX_TIME_MS) || 30000; // 30 seconds
     this.useHybridSearch = RELAYER_USE_HYBRID_SEARCH === "true";
 
-    // Validation for backward search config
+    // Validation for global backward search config
     assert(this.backwardSearchLookback > 0, "backwardSearchLookback must be greater than 0");
     assert(this.backwardSearchMaxEvents > 0, "backwardSearchMaxEvents must be greater than 0");
     assert(this.backwardSearchChunkSize > 0, "backwardSearchChunkSize must be greater than 0");
@@ -377,6 +396,111 @@ export class RelayerConfig extends CommonConfig {
            "backwardSearchMaxChunkSize must be >= backwardSearchChunkSize");
     assert(this.backwardSearchGrowthFactor >= 1.0, "backwardSearchGrowthFactor must be >= 1.0");
     assert(this.backwardSearchMaxTimeMs > 0, "backwardSearchMaxTimeMs must be greater than 0");
+  }
+
+  /**
+   * @notice Load per-chain backward search configuration from environment variables
+   * @param chainIds Array of chain IDs to configure
+   * @param logger Logger instance for debugging
+   */
+  private loadPerChainBackwardSearchConfig(chainIds: number[], logger: winston.Logger): void {
+    chainIds.forEach((chainId) => {
+      const chainName = getNetworkName(chainId);
+      
+      // Load per-chain configuration with fallback to global defaults
+      const enabled = this.env[`RELAYER_BACKWARD_SEARCH_ENABLED_${chainId}`];
+      const lookback = this.env[`RELAYER_BACKWARD_SEARCH_LOOKBACK_${chainId}`];
+      const maxEvents = this.env[`RELAYER_BACKWARD_SEARCH_MAX_EVENTS_${chainId}`];
+      const chunkSize = this.env[`RELAYER_BACKWARD_SEARCH_CHUNK_SIZE_${chainId}`];
+      const maxChunkSize = this.env[`RELAYER_BACKWARD_SEARCH_MAX_CHUNK_SIZE_${chainId}`];
+      const growthFactor = this.env[`RELAYER_BACKWARD_SEARCH_GROWTH_FACTOR_${chainId}`];
+      const cacheEnabled = this.env[`RELAYER_BACKWARD_SEARCH_CACHE_ENABLED_${chainId}`];
+      const maxTimeMs = this.env[`RELAYER_BACKWARD_SEARCH_MAX_TIME_MS_${chainId}`];
+      const useHybrid = this.env[`RELAYER_BACKWARD_SEARCH_USE_HYBRID_${chainId}`];
+
+      // Create chain-specific config with fallbacks to global defaults
+      const chainConfig: ChainBackwardSearchConfig = {
+        enabled: enabled !== undefined ? enabled === "true" : this.enableBackwardSearch,
+        lookbackBlocks: lookback !== undefined ? Number(lookback) : this.backwardSearchLookback,
+        maxEvents: maxEvents !== undefined ? Number(maxEvents) : this.backwardSearchMaxEvents,
+        chunkSize: chunkSize !== undefined ? Number(chunkSize) : this.backwardSearchChunkSize,
+        maxChunkSize: maxChunkSize !== undefined ? Number(maxChunkSize) : this.backwardSearchMaxChunkSize,
+        growthFactor: growthFactor !== undefined ? Number(growthFactor) : this.backwardSearchGrowthFactor,
+        cacheEnabled: cacheEnabled !== undefined ? cacheEnabled !== "false" : this.backwardSearchCacheEnabled,
+        maxTimeMs: maxTimeMs !== undefined ? Number(maxTimeMs) : this.backwardSearchMaxTimeMs,
+        useHybridSearch: useHybrid !== undefined ? useHybrid === "true" : this.useHybridSearch,
+      };
+
+      // Validate chain-specific configuration
+      try {
+        assert(chainConfig.lookbackBlocks > 0, `lookbackBlocks must be > 0 for chain ${chainId}`);
+        assert(chainConfig.maxEvents > 0, `maxEvents must be > 0 for chain ${chainId}`);
+        assert(chainConfig.chunkSize > 0, `chunkSize must be > 0 for chain ${chainId}`);
+        assert(chainConfig.maxChunkSize >= chainConfig.chunkSize, 
+               `maxChunkSize must be >= chunkSize for chain ${chainId}`);
+        assert(chainConfig.growthFactor >= 1.0, `growthFactor must be >= 1.0 for chain ${chainId}`);
+        assert(chainConfig.maxTimeMs > 0, `maxTimeMs must be > 0 for chain ${chainId}`);
+
+        this.backwardSearchConfigPerChain[chainId] = chainConfig;
+
+        // Log chain-specific overrides
+        const hasOverrides = enabled || lookback || maxEvents || chunkSize || maxChunkSize || 
+                           growthFactor || cacheEnabled || maxTimeMs || useHybrid;
+        if (hasOverrides && logger) {
+          logger.debug({
+            at: "RelayerConfig::loadPerChainBackwardSearchConfig",
+            message: `Loaded backward search config for ${chainName}`,
+            chainId,
+            config: chainConfig,
+          });
+        }
+      } catch (error) {
+        logger.error({
+          at: "RelayerConfig::loadPerChainBackwardSearchConfig",
+          message: `Invalid backward search config for ${chainName}`,
+          chainId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    });
+
+    logger.debug({
+      at: "RelayerConfig::loadPerChainBackwardSearchConfig",
+      message: `Loaded backward search config for ${chainIds.length} chains`,
+      enabledChains: Object.entries(this.backwardSearchConfigPerChain)
+        .filter(([, config]) => config.enabled)
+        .map(([chainId]) => getNetworkName(Number(chainId))),
+    });
+  }
+
+  /**
+   * @notice Get backward search configuration for a specific chain
+   * @param chainId Chain ID to get configuration for
+   * @returns Chain-specific backward search configuration
+   */
+  getBackwardSearchConfigForChain(chainId: number): ChainBackwardSearchConfig {
+    return this.backwardSearchConfigPerChain[chainId] || {
+      enabled: this.enableBackwardSearch,
+      lookbackBlocks: this.backwardSearchLookback,
+      maxEvents: this.backwardSearchMaxEvents,
+      chunkSize: this.backwardSearchChunkSize,
+      maxChunkSize: this.backwardSearchMaxChunkSize,
+      growthFactor: this.backwardSearchGrowthFactor,
+      cacheEnabled: this.backwardSearchCacheEnabled,
+      maxTimeMs: this.backwardSearchMaxTimeMs,
+      useHybridSearch: this.useHybridSearch,
+    };
+  }
+
+  /**
+   * @notice Check if backward search is enabled for a specific chain
+   * @param chainId Chain ID to check
+   * @returns True if backward search is enabled for the chain
+   */
+  isBackwardSearchEnabledForChain(chainId: number): boolean {
+    const config = this.getBackwardSearchConfigForChain(chainId);
+    return config.enabled;
   }
 
   /**
@@ -410,6 +534,9 @@ export class RelayerConfig extends CommonConfig {
       listenerPath[chainId] =
         process.env[`RELAYER_SPOKEPOOL_LISTENER_PATH_${chainId}`] ?? RELAYER_SPOKEPOOL_LISTENER_PATH;
     });
+
+    // Load per-chain backward search configuration
+    this.loadPerChainBackwardSearchConfig(relayerChainIds, logger);
 
     // Only validate config for chains that the relayer cares about.
     super.validate(relayerChainIds, logger);
