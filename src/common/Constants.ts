@@ -64,6 +64,9 @@ export const INFINITE_FILL_DEADLINE = bnUint32Max;
 // Target ~4 hours
 export const MAX_RELAYER_DEPOSIT_LOOK_BACK = 4 * 60 * 60;
 
+// Target ~30 minutes for SpokePoolClient updates to reduce RPC load
+export const DEFAULT_SPOKEPOOL_UPDATE_LOOKBACK = 30 * 60;
+
 // Target ~14 days per chain. Should cover all events that could be finalized, so 2x the optimistic
 // rollup challenge period seems safe.
 export const FINALIZER_TOKENBRIDGE_LOOKBACK = 14 * 24 * 60 * 60;

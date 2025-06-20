@@ -116,3 +116,10 @@ We publish pre-releases to signal to users about potential releases that are ris
 ### Documenting changes
 
 Every merged PR into `master` should be following the [conventional commit](https://www.conventionalcommits.org/en/v1.0.0/) format, as documented in [CONTRIBUTING.md](https://github.com/UMAprotocol/protocol/blob/master/CONTRIBUTING.md).
+
+## Environment Variables
+
+### Relayer Configuration
+
+- `MAX_RELAYER_DEPOSIT_LOOK_BACK`: How far back (in seconds) to look for deposit events for general relayer operations. Default: 14400 (4 hours)
+- `SPOKEPOOL_UPDATE_LOOKBACK`: How far back (in seconds) to look for events when updating SpokePoolClients. This should be shorter than `MAX_RELAYER_DEPOSIT_LOOK_BACK` to reduce RPC load. Default: 1800 (30 minutes)

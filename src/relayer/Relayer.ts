@@ -138,13 +138,24 @@ export class Relayer {
       }
     }
 
-    await updateSpokePoolClients(spokePoolClients, [
-      "FundsDeposited",
-      "RequestedSpeedUpDeposit",
-      "FilledRelay",
-      "RelayedRootBundle",
-      "ExecutedRelayerRefundRoot",
-    ]);
+    this.logger.debug({
+      at: "Relayer#update",
+      message: "Updating SpokePoolClients",
+      spokePoolUpdateLookback: this.config.spokePoolUpdateLookback,
+      maxRelayerLookBack: this.config.maxRelayerLookBack,
+      chainIds: Object.keys(spokePoolClients),
+      enableBackwardSearch: this.config.enableBackwardSearch,
+    });
+
+    // Use enhanced update method if backward search is enabled
+    if (this.config.enableBackwardSearch) {
+      await this.updateSpokePoolClientsWithBackwardSearch(spokePoolClients);
+    } else {
+      await updateSpokePoolClients(spokePoolClients, [
+        "FundsDeposited",
+        "FilledRelay",
+      ]);
+    }
 
     await Promise.all([
       acrossApiClient.update(this.config.ignoreLimits),
@@ -153,6 +164,75 @@ export class Relayer {
     ]);
 
     return Object.values(spokePoolClients).every((spokePoolClient) => spokePoolClient.isUpdated);
+  }
+
+  /**
+   * @description Update spoke pool clients using backward search when enabled
+   */
+  private async updateSpokePoolClientsWithBackwardSearch(spokePoolClients: any): Promise<void> {
+    const eventsToQuery = ["FundsDeposited", "FilledRelay"];
+    
+    // Determine search strategy based on configuration and current state
+    const useBackwardSearch = this.shouldUseBackwardSearch();
+    
+    await Promise.all(
+      Object.values(spokePoolClients).map(async (client: any) => {
+        try {
+          if (client.updateWithBackwardSearch && (useBackwardSearch || this.config.useHybridSearch)) {
+            const searchOptions = {
+              useAdaptiveSearch: true,
+              lookbackBlocks: this.config.backwardSearchLookback,
+              maxEvents: this.config.backwardSearchMaxEvents,
+              maxSearchTimeMs: this.config.backwardSearchMaxTimeMs,
+            };
+
+            const result = await client.updateWithBackwardSearch(eventsToQuery, searchOptions);
+            
+            if (result.backwardSearchResult) {
+              this.logger.debug({
+                at: "Relayer#updateSpokePoolClientsWithBackwardSearch",
+                message: "Backward search completed",
+                chainId: client.chainId,
+                searchMethod: result.searchMethod,
+                eventsFound: result.backwardSearchResult.events.length,
+                blocksSearched: result.backwardSearchResult.totalBlocksSearched,
+                cacheHits: result.backwardSearchResult.cacheHits,
+                searchTimeMs: result.backwardSearchResult.searchTimeMs,
+              });
+            }
+          } else {
+            // Fall back to standard update
+            await client.update(eventsToQuery);
+          }
+        } catch (error) {
+          this.logger.warn({
+            at: "Relayer#updateSpokePoolClientsWithBackwardSearch",
+            message: "Failed to update spoke pool client with backward search, falling back to standard update",
+            chainId: client.chainId,
+            error: error.message,
+          });
+          
+          // Fallback to standard update
+          await client.update(eventsToQuery);
+        }
+      })
+    );
+  }
+
+  /**
+   * @description Determine whether to use backward search based on current conditions
+   */
+  private shouldUseBackwardSearch(): boolean {
+    // Use backward search when:
+    // 1. This is the first update (updated === 1 after increment)
+    // 2. It's been a while since the last update (connection issues)
+    // 3. We're in startup phase and need to catch up quickly
+    
+    const isFirstRun = this.updated === 1;
+    const timeSinceLastUpdate = getCurrentTime() - this.lastLogTime;
+    const isLongGap = timeSinceLastUpdate > 300; // 5 minutes
+    
+    return isFirstRun || isLongGap;
   }
 
   /**

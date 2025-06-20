@@ -67,6 +67,20 @@ export class RelayerConfig extends CommonConfig {
   // TODO: Remove this config item once we fully move to generic chain adapters.
   readonly useGenericAdapter: boolean;
 
+  // SpokePoolClient update specific lookback time in seconds (default: 30 minutes)
+  readonly spokePoolUpdateLookback: number;
+
+  // Backward event search configuration
+  readonly enableBackwardSearch: boolean;
+  readonly backwardSearchLookback: number;
+  readonly backwardSearchMaxEvents: number;
+  readonly backwardSearchChunkSize: number;
+  readonly backwardSearchMaxChunkSize: number;
+  readonly backwardSearchGrowthFactor: number;
+  readonly backwardSearchCacheEnabled: boolean;
+  readonly backwardSearchMaxTimeMs: number;
+  readonly useHybridSearch: boolean;
+
   constructor(env: ProcessEnv) {
     const {
       RELAYER_ORIGIN_CHAINS,
@@ -91,6 +105,16 @@ export class RelayerConfig extends CommonConfig {
       RELAYER_TRY_MULTICALL_CHAINS,
       RELAYER_LOGGING_INTERVAL = "30",
       RELAYER_MAINTENANCE_INTERVAL = "60",
+      SPOKEPOOL_UPDATE_LOOKBACK,
+      RELAYER_ENABLE_BACKWARD_SEARCH,
+      RELAYER_BACKWARD_SEARCH_LOOKBACK,
+      RELAYER_BACKWARD_SEARCH_MAX_EVENTS,
+      RELAYER_BACKWARD_SEARCH_CHUNK_SIZE,
+      RELAYER_BACKWARD_SEARCH_MAX_CHUNK_SIZE,
+      RELAYER_BACKWARD_SEARCH_GROWTH_FACTOR,
+      RELAYER_BACKWARD_SEARCH_CACHE_ENABLED,
+      RELAYER_BACKWARD_SEARCH_MAX_TIME_MS,
+      RELAYER_USE_HYBRID_SEARCH,
     } = env;
     super(env);
 
@@ -330,6 +354,29 @@ export class RelayerConfig extends CommonConfig {
     }
 
     this.ignoreLimits = RELAYER_IGNORE_LIMITS === "true";
+
+    this.spokePoolUpdateLookback = Number(SPOKEPOOL_UPDATE_LOOKBACK) || Constants.DEFAULT_SPOKEPOOL_UPDATE_LOOKBACK;
+    assert(this.spokePoolUpdateLookback > 0, "spokePoolUpdateLookback must be greater than 0");
+
+    // Initialize backward search configuration
+    this.enableBackwardSearch = RELAYER_ENABLE_BACKWARD_SEARCH === "true";
+    this.backwardSearchLookback = Number(RELAYER_BACKWARD_SEARCH_LOOKBACK) || 10000; // blocks
+    this.backwardSearchMaxEvents = Number(RELAYER_BACKWARD_SEARCH_MAX_EVENTS) || 1000;
+    this.backwardSearchChunkSize = Number(RELAYER_BACKWARD_SEARCH_CHUNK_SIZE) || 500;
+    this.backwardSearchMaxChunkSize = Number(RELAYER_BACKWARD_SEARCH_MAX_CHUNK_SIZE) || 5000;
+    this.backwardSearchGrowthFactor = Number(RELAYER_BACKWARD_SEARCH_GROWTH_FACTOR) || 2.0;
+    this.backwardSearchCacheEnabled = RELAYER_BACKWARD_SEARCH_CACHE_ENABLED !== "false"; // Default true
+    this.backwardSearchMaxTimeMs = Number(RELAYER_BACKWARD_SEARCH_MAX_TIME_MS) || 30000; // 30 seconds
+    this.useHybridSearch = RELAYER_USE_HYBRID_SEARCH === "true";
+
+    // Validation for backward search config
+    assert(this.backwardSearchLookback > 0, "backwardSearchLookback must be greater than 0");
+    assert(this.backwardSearchMaxEvents > 0, "backwardSearchMaxEvents must be greater than 0");
+    assert(this.backwardSearchChunkSize > 0, "backwardSearchChunkSize must be greater than 0");
+    assert(this.backwardSearchMaxChunkSize >= this.backwardSearchChunkSize, 
+           "backwardSearchMaxChunkSize must be >= backwardSearchChunkSize");
+    assert(this.backwardSearchGrowthFactor >= 1.0, "backwardSearchGrowthFactor must be >= 1.0");
+    assert(this.backwardSearchMaxTimeMs > 0, "backwardSearchMaxTimeMs must be greater than 0");
   }
 
   /**

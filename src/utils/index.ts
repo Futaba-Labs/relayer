@@ -28,6 +28,9 @@ export { config } from "dotenv";
 export { replaceAddressCase } from "@uma/common";
 export { Logger, waitForLogger } from "@uma/logger";
 
+// Backward search exports
+export * from "./BackwardEventSearcher";
+
 export {
   CHAIN_IDs,
   TESTNET_CHAIN_IDs,

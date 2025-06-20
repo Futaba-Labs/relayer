@@ -11,6 +11,7 @@ import {
   TryMulticallClient,
 } from "../clients";
 import { IndexedSpokePoolClient, IndexerOpts } from "../clients/SpokePoolClient";
+import { EnhancedSpokePoolClient } from "../clients/EnhancedSpokePoolClient";
 import {
   Clients,
   constructClients,
@@ -36,8 +37,9 @@ async function indexedSpokePoolClient(
   baseSigner: Signer,
   hubPoolClient: HubPoolClient,
   chainId: number,
-  opts: IndexerOpts & { lookback: number; blockRange: number }
-): Promise<IndexedSpokePoolClient> {
+  opts: IndexerOpts & { lookback: number; blockRange: number },
+  enableBackwardSearch: boolean = false
+): Promise<IndexedSpokePoolClient | EnhancedSpokePoolClient> {
   const { logger } = hubPoolClient;
 
   // Set up Spoke signers and connect them to spoke pool contract objects.
@@ -51,17 +53,32 @@ async function indexedSpokePoolClient(
     getBlockForTimestamp(chainId, getCurrentTime() - opts.lookback, blockFinder, redis),
   ]);
 
-  const spokePoolClient = new IndexedSpokePoolClient(
-    logger,
-    SpokePool.connect(spokePoolAddr, signer),
-    hubPoolClient,
-    chainId,
-    activationBlock,
-    { from, maxLookBack: opts.blockRange },
-    opts
-  );
+  const spokePoolContract = SpokePool.connect(spokePoolAddr, signer);
+  const eventSearchConfig = { from, maxLookBack: opts.blockRange };
 
-  return spokePoolClient;
+  if (enableBackwardSearch) {
+    const spokePoolClient = new EnhancedSpokePoolClient(
+      logger,
+      spokePoolContract,
+      hubPoolClient,
+      chainId,
+      activationBlock,
+      eventSearchConfig,
+      opts
+    );
+    return spokePoolClient;
+  } else {
+    const spokePoolClient = new IndexedSpokePoolClient(
+      logger,
+      spokePoolContract,
+      hubPoolClient,
+      chainId,
+      activationBlock,
+      eventSearchConfig,
+      opts
+    );
+    return spokePoolClient;
+  }
 }
 
 export async function constructRelayerClients(
@@ -92,11 +109,11 @@ export async function constructRelayerClients(
     spokePoolClients = Object.fromEntries(
       await sdkUtils.mapAsync(enabledChains ?? configStoreClient.getEnabledChains(), async (chainId) => {
         const opts = {
-          lookback: config.maxRelayerLookBack,
+          lookback: config.spokePoolUpdateLookback,
           blockRange: config.maxBlockLookBack[chainId],
           path: config.listenerPath[chainId],
         };
-        return [chainId, await indexedSpokePoolClient(baseSigner, hubPoolClient, chainId, opts)];
+        return [chainId, await indexedSpokePoolClient(baseSigner, hubPoolClient, chainId, opts, config.enableBackwardSearch)];
       })
     );
   } else {
@@ -106,7 +123,7 @@ export async function constructRelayerClients(
       configStoreClient,
       config,
       baseSigner,
-      config.maxRelayerLookBack,
+      config.spokePoolUpdateLookback,
       enabledChains
     );
   }

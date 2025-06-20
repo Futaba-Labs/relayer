@@ -70,7 +70,8 @@ export class CommonConfig {
 
     this.blockRangeEndBlockBuffer = mergeConfig(Constants.BUNDLE_END_BLOCK_BUFFERS, BLOCK_RANGE_END_BLOCK_BUFFER);
 
-    // `maxRelayerLookBack` is how far we fetch events from, modifying the search config's 'fromBlock'
+    // `maxRelayerLookBack` is how far we fetch events from for general relayer operations, modifying the search config's 'fromBlock'
+    // Note: SpokePoolClient updates use a separate, shorter lookback configured via SPOKEPOOL_UPDATE_LOOKBACK
     this.maxRelayerLookBack = Number(MAX_RELAYER_DEPOSIT_LOOK_BACK ?? Constants.MAX_RELAYER_DEPOSIT_LOOK_BACK);
     this.pollingDelay = Number(POLLING_DELAY ?? 60);
     this.spokePoolChainsOverride = JSON.parse(SPOKE_POOL_CHAINS_OVERRIDE ?? "[]");
