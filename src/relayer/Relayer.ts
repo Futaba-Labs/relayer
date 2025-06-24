@@ -909,7 +909,10 @@ export class Relayer {
         tokenClient.decrementLocalBalance(destinationChainId, outputToken, outputAmount);
 
         const gasLimit = isMessageEmpty(resolveDepositMessage(deposit)) ? undefined : _gasLimit;
-        this.fillRelay(deposit, repaymentChainId, realizedLpFeePct, gasPrice, gasLimit);
+        
+        // Pass optimal gas information if available
+        const optimalGas = (repaymentChainProfitability as any)?.optimalGas;
+        this.fillRelay(deposit, repaymentChainId, realizedLpFeePct, gasPrice, gasLimit, optimalGas);
       }
     } else {
       // Exit early if we want to request a slow fill for a lite chain.
@@ -1184,7 +1187,8 @@ export class Relayer {
     repaymentChainId: number,
     realizedLpFeePct: BigNumber,
     gasPrice: BigNumber,
-    gasLimit?: BigNumber
+    gasLimit?: BigNumber,
+    optimalGas?: any
   ): void {
     const { spokePoolClients } = this.clients;
 
@@ -1238,7 +1242,25 @@ export class Relayer {
       const contract = spokePoolClient.spokePool;
       const chainId = deposit.destinationChainId;
       const multiCallerClient = this.getMulticaller(chainId);
-      multiCallerClient.enqueueTransaction({ contract, chainId, method, args, gasLimit, message, mrkdwn });
+      
+      // Include optimal gas parameters if available
+      const txnConfig: any = { contract, chainId, method, args, gasLimit, message, mrkdwn };
+      if (optimalGas && optimalGas.isOptimal) {
+        txnConfig.optimalGas = optimalGas;
+        this.logger.debug({
+          at: "Relayer::fillRelay",
+          message: `Using optimal gas parameters for deposit ${deposit.depositId.toString()}`,
+          optimalGas: {
+            maxFeePerGas: optimalGas.maxFeePerGas?.toString(),
+            maxPriorityFeePerGas: optimalGas.maxPriorityFeePerGas?.toString(),
+            baseFeePerGas: optimalGas.baseFeePerGas?.toString(),
+            profitBps: optimalGas.profitBps,
+            isOptimal: optimalGas.isOptimal,
+          },
+        });
+      }
+      
+      multiCallerClient.enqueueTransaction(txnConfig);
     }
 
     this.setFillStatus(deposit, FillStatus.Filled);
@@ -1320,21 +1342,46 @@ export class Relayer {
       gasCost: BigNumber;
       gasPrice: BigNumber;
       relayerFeePct: BigNumber;
+      optimalGas?: any;
     }> => {
-      const {
-        profitable,
-        nativeGasCost: gasLimit,
-        tokenGasCost: gasCost,
-        gasPrice,
-        netRelayerFeePct: relayerFeePct, // net relayer fee is equal to total fee minus the lp fee.
-      } = await profitClient.isFillProfitable(deposit, lpFeePct, hubPoolToken, preferredChainId);
-      return {
-        profitable,
-        gasLimit,
-        gasCost,
-        gasPrice,
-        relayerFeePct,
-      };
+      // Use optimal gas calculation if enabled via environment variable
+      const useOptimalGas = process.env.RELAYER_USE_OPTIMAL_GAS === "true";
+      
+      if (useOptimalGas) {
+        const profitabilityResult = await profitClient.getFillProfitabilityWithOptimalGas(
+          deposit, 
+          lpFeePct, 
+          hubPoolToken, 
+          preferredChainId, 
+          true // useOptimalGas = true
+        );
+        
+        return {
+          profitable: profitabilityResult.profitable,
+          gasLimit: profitabilityResult.nativeGasCost,
+          gasCost: profitabilityResult.tokenGasCost,
+          gasPrice: profitabilityResult.gasPrice,
+          relayerFeePct: profitabilityResult.netRelayerFeePct,
+          optimalGas: profitabilityResult.optimalGas,
+        };
+      } else {
+        // Fallback to standard profitability calculation
+        const {
+          profitable,
+          nativeGasCost: gasLimit,
+          tokenGasCost: gasCost,
+          gasPrice,
+          netRelayerFeePct: relayerFeePct, // net relayer fee is equal to total fee minus the lp fee.
+        } = await profitClient.isFillProfitable(deposit, lpFeePct, hubPoolToken, preferredChainId);
+        
+        return {
+          profitable,
+          gasLimit,
+          gasCost,
+          gasPrice,
+          relayerFeePct,
+        };
+      }
     };
 
     const repaymentChainProfitabilities = await Promise.all(
@@ -1350,15 +1397,16 @@ export class Relayer {
     let preferredChain: number | undefined = undefined;
 
     // @dev The following internal function should be the only one used to set `preferredChain` above.
-    const getProfitabilityDataForPreferredChainIndex = (preferredChainIndex: number): RepaymentChainProfitability => {
+    const getProfitabilityDataForPreferredChainIndex = (preferredChainIndex: number): RepaymentChainProfitability & { optimalGas?: any } => {
       const lpFeePct = lpFeePcts[preferredChainIndex];
-      const { gasLimit, gasCost, relayerFeePct, gasPrice } = repaymentChainProfitabilities[preferredChainIndex];
+      const { gasLimit, gasCost, relayerFeePct, gasPrice, optimalGas } = repaymentChainProfitabilities[preferredChainIndex];
       return {
         gasLimit,
         gasCost,
         gasPrice,
         relayerFeePct,
         lpFeePct,
+        optimalGas,
       };
     };
     let profitabilityData: RepaymentChainProfitability = getProfitabilityDataForPreferredChainIndex(0);

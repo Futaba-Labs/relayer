@@ -1,0 +1,47 @@
+[
+  {
+    "outputAmount": 1000000000000000000,
+    "baseFee": 12000000000,
+    "profitBps": 15.5,
+    "srcChainId": 1,
+    "dstChainId": 10,
+    "tokenSymbol": "ETH",
+    "timestamp": 1703980800
+  },
+  {
+    "outputAmount": 500000000000000000,
+    "baseFee": 15000000000,
+    "profitBps": 12.3,
+    "srcChainId": 1,
+    "dstChainId": 137,
+    "tokenSymbol": "USDC",
+    "timestamp": 1703984400
+  },
+  {
+    "outputAmount": 2000000000000000000,
+    "baseFee": 18000000000,
+    "profitBps": 20.1,
+    "srcChainId": 42161,
+    "dstChainId": 10,
+    "tokenSymbol": "ETH",
+    "timestamp": 1703988000
+  },
+  {
+    "outputAmount": 1500000000000000000,
+    "baseFee": 10000000000,
+    "profitBps": 8.7,
+    "srcChainId": 1,
+    "dstChainId": 42161,
+    "tokenSymbol": "WETH",
+    "timestamp": 1703991600
+  },
+  {
+    "outputAmount": 750000000000000000,
+    "baseFee": 22000000000,
+    "profitBps": 25.4,
+    "srcChainId": 10,
+    "dstChainId": 1,
+    "tokenSymbol": "ETH",
+    "timestamp": 1703995200
+  }
+]

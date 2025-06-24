@@ -34,6 +34,15 @@ export interface AugmentedTransaction {
   // If true, the transaction is being sent to a non Multicall contract so we can't batch it together
   // with other transactions.
   nonMulticall?: boolean;
+  // Optional optimal gas parameters calculated from historical intent data
+  optimalGas?: {
+    maxFeePerGas?: BigNumber;
+    maxPriorityFeePerGas?: BigNumber;
+    baseFeePerGas?: BigNumber;
+    gasPrice?: BigNumber;
+    profitBps?: number;
+    isOptimal?: boolean;
+  };
 }
 
 const { fixedPointAdjustment: fixedPoint } = sdkUtils;
@@ -78,7 +87,7 @@ export class TransactionClient {
   }
 
   protected async _submit(txn: AugmentedTransaction, nonce: number | null = null): Promise<TransactionResponse> {
-    const { contract, method, args, value, gasLimit, chainId } = txn;
+    const { contract, method, args, value, gasLimit, chainId, optimalGas } = txn;
 
     // For mainnet transactions, use a separate RPC endpoint if configured
     if (chainId === CHAIN_IDs.MAINNET) {
@@ -96,7 +105,7 @@ export class TransactionClient {
         // Create a new contract instance with the mainnet transaction provider
         const mainnetContract = new Contract(contract.address, contract.interface, mainnetSigner);
         try {
-          return await runTransaction(this.logger, mainnetContract, method, args, value, gasLimit, nonce);
+          return await runTransaction(this.logger, mainnetContract, method, args, value, gasLimit, nonce, optimalGas);
         } catch (error) {
           this.logger.warn({
             at: "TransactionClient#_submit",
@@ -109,7 +118,7 @@ export class TransactionClient {
         }
       }
     } else {
-      return runTransaction(this.logger, contract, method, args, value, gasLimit, nonce);
+      return runTransaction(this.logger, contract, method, args, value, gasLimit, nonce, optimalGas);
     }
   }
 

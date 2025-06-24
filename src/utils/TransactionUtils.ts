@@ -68,6 +68,14 @@ export async function runTransaction(
   value = bnZero,
   gasLimit: BigNumber | null = null,
   nonce: number | null = null,
+  optimalGas?: {
+    maxFeePerGas?: BigNumber;
+    maxPriorityFeePerGas?: BigNumber;
+    baseFeePerGas?: BigNumber;
+    gasPrice?: BigNumber;
+    profitBps?: number;
+    isOptimal?: boolean;
+  },
   retriesRemaining = 1
 ): Promise<TransactionResponse> {
   const { provider } = contract;
@@ -79,23 +87,55 @@ export async function runTransaction(
   }
 
   try {
-    const priorityFeeScaler =
-      Number(process.env[`PRIORITY_FEE_SCALER_${chainId}`] || process.env.PRIORITY_FEE_SCALER) ||
-      DEFAULT_GAS_FEE_SCALERS[chainId]?.maxPriorityFeePerGasScaler;
-    const maxFeePerGasScaler =
-      Number(process.env[`MAX_FEE_PER_GAS_SCALER_${chainId}`] || process.env.MAX_FEE_PER_GAS_SCALER) ||
-      DEFAULT_GAS_FEE_SCALERS[chainId]?.maxFeePerGasScaler;
+    let gas: any;
+    
+    // Use optimal gas parameters if available and optimal
+    if (optimalGas && optimalGas.isOptimal) {
+      logger.debug({
+        at: "TransactionUtils#runTransaction",
+        message: "Using optimal gas parameters from dynamic gas calculation",
+        chainId,
+        method,
+        optimalGas: {
+          maxFeePerGas: optimalGas.maxFeePerGas?.toString(),
+          maxPriorityFeePerGas: optimalGas.maxPriorityFeePerGas?.toString(),
+          baseFeePerGas: optimalGas.baseFeePerGas?.toString(),
+          gasPrice: optimalGas.gasPrice?.toString(),
+          profitBps: optimalGas.profitBps,
+        },
+      });
+      
+      // Use optimal gas parameters
+      if (LEGACY_TRANSACTION_CHAINS.includes(chainId)) {
+        // Legacy chains use gasPrice
+        gas = { gasPrice: optimalGas.gasPrice || optimalGas.maxFeePerGas };
+      } else {
+        // EIP-1559 chains use maxFeePerGas and maxPriorityFeePerGas
+        gas = {
+          maxFeePerGas: optimalGas.maxFeePerGas,
+          maxPriorityFeePerGas: optimalGas.maxPriorityFeePerGas,
+        };
+      }
+    } else {
+      // Fallback to standard gas calculation
+      const priorityFeeScaler =
+        Number(process.env[`PRIORITY_FEE_SCALER_${chainId}`] || process.env.PRIORITY_FEE_SCALER) ||
+        DEFAULT_GAS_FEE_SCALERS[chainId]?.maxPriorityFeePerGasScaler;
+      const maxFeePerGasScaler =
+        Number(process.env[`MAX_FEE_PER_GAS_SCALER_${chainId}`] || process.env.MAX_FEE_PER_GAS_SCALER) ||
+        DEFAULT_GAS_FEE_SCALERS[chainId]?.maxFeePerGasScaler;
 
-    let gas = await getGasPrice(
-      provider,
-      priorityFeeScaler,
-      maxFeePerGasScaler,
-      await contract.populateTransaction[method](...(args as Array<unknown>), { value })
-    );
+      gas = await getGasPrice(
+        provider,
+        priorityFeeScaler,
+        maxFeePerGasScaler,
+        await contract.populateTransaction[method](...(args as Array<unknown>), { value })
+      );
 
-    // Check if the chain requires legacy transactions
-    if (LEGACY_TRANSACTION_CHAINS.includes(chainId)) {
-      gas = { gasPrice: gas.maxFeePerGas };
+      // Check if the chain requires legacy transactions
+      if (LEGACY_TRANSACTION_CHAINS.includes(chainId)) {
+        gas = { gasPrice: gas.maxFeePerGas };
+      }
     }
 
     logger.debug({
@@ -128,7 +168,7 @@ export async function runTransaction(
         retriesRemaining,
       });
 
-      return await runTransaction(logger, contract, method, args, value, gasLimit, null, retriesRemaining);
+      return await runTransaction(logger, contract, method, args, value, gasLimit, null, optimalGas, retriesRemaining);
     } else {
       // Empirically we have observed that Ethers can produce nested errors, so we try to recurse down them
       // and log them as clearly as possible. For example:
