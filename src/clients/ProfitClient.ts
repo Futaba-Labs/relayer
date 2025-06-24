@@ -539,7 +539,7 @@ export class ProfitClient {
       const optimalGasResult = await this.calculateOptimalGas(
         deposit,
         actualBaseFee,
-        standardResult.nativeGasCost.mul(9).div(10),
+        standardResult.nativeGasCost.mul(7).div(10),
         deposit.inputAmount.sub(deposit.outputAmount)
       );
 
