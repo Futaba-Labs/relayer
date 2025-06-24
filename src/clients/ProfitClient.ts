@@ -861,9 +861,21 @@ export class ProfitClient {
   private async convertToEth(amount: BigNumber, tokenAddress: string, chainId: number): Promise<BigNumber> {
     try {
       const wethAddress = getDeployedAddress("WETH", chainId);
+      this.logger.warn({
+        at: "ProfitClient#convertToEth",
+        message: "Converting token to ETH",
+        tokenAddress,
+        chainId,
+      });
 
       // If token is WETH, no conversion needed - return amount as is
       if (tokenAddress.toLowerCase() === wethAddress.toLowerCase()) {
+        this.logger.warn({
+          at: "ProfitClient#convertToEth",
+          message: "Token is WETH, no conversion needed",
+          tokenAddress,
+          chainId,
+        });
         return amount;
       }
 
