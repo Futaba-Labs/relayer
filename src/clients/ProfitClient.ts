@@ -860,32 +860,13 @@ export class ProfitClient {
   // Convert token value to ETH for gas calculations
   private async convertToEth(amount: BigNumber, tokenAddress: string, chainId: number): Promise<BigNumber> {
     try {
-      this.logger.warn({
-        at: "ProfitClient#convertToEth",
-        message: "Getting WETH address",
-        tokenAddress,
-        chainId,
-      });
-      const wethAddress = getDeployedAddress("WETH", chainId);
-      this.logger.warn({
-        at: "ProfitClient#convertToEth",
-        message: "Converting token to ETH",
-        tokenAddress,
-        chainId,
-      });
-
-      // If token is WETH, no conversion needed - return amount as is
-      if (tokenAddress.toLowerCase() === wethAddress.toLowerCase()) {
-        this.logger.warn({
-          at: "ProfitClient#convertToEth",
-          message: "Token is WETH, no conversion needed",
-          tokenAddress,
-          chainId,
-        });
+      const tokenSymbol = this.getTokenSymbol(tokenAddress, chainId);
+      
+      // If token is WETH or ETH, no conversion needed - return amount as is
+      if (tokenSymbol === "WETH" || tokenSymbol === "ETH") {
         return amount;
       }
 
-      const tokenSymbol = this.getTokenSymbol(tokenAddress, chainId);
       const tokenPrice = this.getPriceOfToken(tokenSymbol);
       const ethPrice = this.getPriceOfToken("ETH");
 
@@ -894,7 +875,14 @@ export class ProfitClient {
       }
 
       const tokenInfo = getTokenInfo(tokenAddress, chainId);
-      const ethInfo = getTokenInfo(wethAddress, chainId);
+      
+      // Get WETH info for calculations - use mainnet WETH as reference
+      const wethMainnetAddress = TOKEN_SYMBOLS_MAP["WETH"]?.addresses[CHAIN_IDs.MAINNET];
+      if (!wethMainnetAddress) {
+        throw new Error("WETH address not found in TOKEN_SYMBOLS_MAP");
+      }
+      
+      const ethInfo = getTokenInfo(wethMainnetAddress, CHAIN_IDs.MAINNET);
 
       // Convert: amount * tokenPrice / ethPrice, accounting for decimals
       return amount
