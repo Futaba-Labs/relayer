@@ -105,12 +105,12 @@ export class TransactionClient {
           });
           // Fall back to original provider
           // return runTransaction(this.logger, contract, method, args, value, gasLimit, nonce);
+          return null;
         }
       }
+    } else {
+      return runTransaction(this.logger, contract, method, args, value, gasLimit, nonce);
     }
-
-    // Default behavior for non-mainnet chains or when no separate mainnet RPC is configured
-    return runTransaction(this.logger, contract, method, args, value, gasLimit, nonce);
   }
 
   async submit(chainId: number, txns: AugmentedTransaction[]): Promise<TransactionResponse[]> {
