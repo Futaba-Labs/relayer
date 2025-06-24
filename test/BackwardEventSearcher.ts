@@ -17,15 +17,15 @@ describe("BackwardEventSearcher", () => {
       level: "debug",
       transports: [new winston.transports.Console({ silent: true })],
     });
-    
+
     chainId = 1;
-    
+
     mockContract = sinon.createStubInstance(Contract);
     mockContract.provider = {
       getBlockNumber: sinon.stub().resolves(1000),
       getBlock: sinon.stub().resolves({ timestamp: Math.floor(Date.now() / 1000) }),
     } as any;
-    
+
     mockCache = {
       get: sinon.stub().resolves(null),
       set: sinon.stub().resolves(),
@@ -59,7 +59,7 @@ describe("BackwardEventSearcher", () => {
         } as Log,
       ];
 
-      const fetchStub = sinon.stub(searcher as any, 'fetchEventsForRange').resolves(mockEvents);
+      const fetchStub = sinon.stub(searcher as any, "fetchEventsForRange").resolves(mockEvents);
 
       const config: BackwardSearchConfig = {
         eventsToFind: ["FundsDeposited"],
@@ -72,11 +72,11 @@ describe("BackwardEventSearcher", () => {
 
       const result = await searcher.searchBackward(1000, config);
 
-      expect(result.events).to.be.an('array');
-      expect(result.totalBlocksSearched).to.be.a('number');
-      expect(result.searchTimeMs).to.be.a('number');
-      expect(result.cacheHits).to.be.a('number');
-      expect(result.searchedToBlock).to.be.a('number');
+      expect(result.events).to.be.an("array");
+      expect(result.totalBlocksSearched).to.be.a("number");
+      expect(result.searchTimeMs).to.be.a("number");
+      expect(result.cacheHits).to.be.a("number");
+      expect(result.searchedToBlock).to.be.a("number");
       expect(fetchStub.callCount).to.be.greaterThan(0);
     });
 
@@ -93,10 +93,10 @@ describe("BackwardEventSearcher", () => {
 
       const result = await searcher.searchBackward(1000, config);
 
-      expect(result).to.have.property('events');
-      expect(result).to.have.property('totalBlocksSearched');
-      expect(result).to.have.property('searchTimeMs');
-      expect(result).to.have.property('cacheHits');
+      expect(result).to.have.property("events");
+      expect(result).to.have.property("totalBlocksSearched");
+      expect(result).to.have.property("searchTimeMs");
+      expect(result).to.have.property("cacheHits");
     });
 
     it("should stop early when max events reached", async () => {
@@ -199,7 +199,7 @@ describe("BackwardEventSearcher", () => {
         args: {},
       } as Log;
 
-      const searchStub = sinon.stub(searcher, 'searchBackward').resolves({
+      const searchStub = sinon.stub(searcher, "searchBackward").resolves({
         events: [mockEvent],
         searchedToBlock: 900,
         totalBlocksSearched: 10,
@@ -220,7 +220,7 @@ describe("BackwardEventSearcher", () => {
     });
 
     it("should return null when no events found", async () => {
-      const searchStub = sinon.stub(searcher, 'searchBackward').resolves({
+      const searchStub = sinon.stub(searcher, "searchBackward").resolves({
         events: [],
         searchedToBlock: 900,
         totalBlocksSearched: 10,
@@ -256,11 +256,11 @@ describe("BackwardEventSearcher", () => {
       ];
 
       // Mock getBlock to return appropriate timestamp
-      (mockContract.provider as any).getBlock.resolves({ 
-        timestamp: Math.floor(Date.now() / 1000) - 1800 
+      (mockContract.provider as any).getBlock.resolves({
+        timestamp: Math.floor(Date.now() / 1000) - 1800,
       }); // 30 minutes ago
 
-      const searchStub = sinon.stub(searcher, 'searchBackward').resolves({
+      const searchStub = sinon.stub(searcher, "searchBackward").resolves({
         events: mockEvents,
         searchedToBlock: 900,
         totalBlocksSearched: 10,
@@ -380,7 +380,7 @@ describe("BackwardEventSearcher", () => {
       // Should not throw error, should continue without cache
       const result = await searcher.searchBackward(1000, config);
 
-      expect(result).to.have.property('events');
+      expect(result).to.have.property("events");
       expect(result.cacheHits).to.equal(0);
     });
   });

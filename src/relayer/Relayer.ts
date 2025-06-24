@@ -148,17 +148,20 @@ export class Relayer {
     });
 
     // Use enhanced update method if backward search is enabled for any chain
-    const hasBackwardSearchEnabled = Object.values(spokePoolClients).some(client => 
+    const hasBackwardSearchEnabled = Object.values(spokePoolClients).some((client) =>
       this.config.isBackwardSearchEnabledForChain(client.chainId)
     );
+
+    this.logger.debug({
+      at: "Relayer#update",
+      message: "hasBackwardSearchEnabled",
+      hasBackwardSearchEnabled,
+    });
 
     if (hasBackwardSearchEnabled) {
       await this.updateSpokePoolClientsWithBackwardSearch(spokePoolClients);
     } else {
-      await updateSpokePoolClients(spokePoolClients, [
-        "FundsDeposited",
-        "FilledRelay",
-      ]);
+      await updateSpokePoolClients(spokePoolClients, ["FundsDeposited", "FilledRelay"]);
     }
 
     await Promise.all([
@@ -175,18 +178,18 @@ export class Relayer {
    */
   private async updateSpokePoolClientsWithBackwardSearch(spokePoolClients: any): Promise<void> {
     const eventsToQuery = ["FundsDeposited", "FilledRelay"];
-    
+
     await Promise.all(
       Object.values(spokePoolClients).map(async (client: any) => {
         const chainId = client.chainId;
         const chainConfig = this.config.getBackwardSearchConfigForChain(chainId);
-        
+
         try {
           // Check if backward search is enabled for this specific chain
           if (chainConfig.enabled && client.updateWithBackwardSearch) {
             // Determine search strategy based on chain config and current state
             const useBackwardSearch = this.shouldUseBackwardSearchForChain(chainId);
-            
+
             if (useBackwardSearch || chainConfig.useHybridSearch) {
               const searchOptions = {
                 useAdaptiveSearch: true,
@@ -196,7 +199,7 @@ export class Relayer {
               };
 
               const result = await client.updateWithBackwardSearch(eventsToQuery, searchOptions);
-              
+
               if (result.backwardSearchResult) {
                 this.logger.debug({
                   at: "Relayer#updateSpokePoolClientsWithBackwardSearch",
@@ -231,7 +234,7 @@ export class Relayer {
             error: error instanceof Error ? error.message : String(error),
             chainConfig,
           });
-          
+
           // Fallback to standard update
           await client.update(eventsToQuery);
         }
@@ -247,13 +250,13 @@ export class Relayer {
     // 1. This is the first update (updated === 1 after increment)
     // 2. It's been a while since the last update (connection issues)
     // 3. We're in startup phase and need to catch up quickly
-    
+
     const isFirstRun = this.updated === 1;
     const timeSinceLastUpdate = getCurrentTime() - this.lastLogTime;
     const isLongGap = timeSinceLastUpdate > 300; // 5 minutes
-    
+
     const shouldUse = isFirstRun || isLongGap;
-    
+
     if (shouldUse) {
       this.logger.debug({
         at: "Relayer#shouldUseBackwardSearchForChain",
@@ -264,7 +267,7 @@ export class Relayer {
         isLongGap,
       });
     }
-    
+
     return shouldUse;
   }
 
@@ -276,7 +279,7 @@ export class Relayer {
     const isFirstRun = this.updated === 1;
     const timeSinceLastUpdate = getCurrentTime() - this.lastLogTime;
     const isLongGap = timeSinceLastUpdate > 300; // 5 minutes
-    
+
     return isFirstRun || isLongGap;
   }
 

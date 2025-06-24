@@ -392,8 +392,10 @@ export class RelayerConfig extends CommonConfig {
     assert(this.backwardSearchLookback > 0, "backwardSearchLookback must be greater than 0");
     assert(this.backwardSearchMaxEvents > 0, "backwardSearchMaxEvents must be greater than 0");
     assert(this.backwardSearchChunkSize > 0, "backwardSearchChunkSize must be greater than 0");
-    assert(this.backwardSearchMaxChunkSize >= this.backwardSearchChunkSize, 
-           "backwardSearchMaxChunkSize must be >= backwardSearchChunkSize");
+    assert(
+      this.backwardSearchMaxChunkSize >= this.backwardSearchChunkSize,
+      "backwardSearchMaxChunkSize must be >= backwardSearchChunkSize"
+    );
     assert(this.backwardSearchGrowthFactor >= 1.0, "backwardSearchGrowthFactor must be >= 1.0");
     assert(this.backwardSearchMaxTimeMs > 0, "backwardSearchMaxTimeMs must be greater than 0");
   }
@@ -406,7 +408,7 @@ export class RelayerConfig extends CommonConfig {
   private loadPerChainBackwardSearchConfig(chainIds: number[], logger: winston.Logger): void {
     chainIds.forEach((chainId) => {
       const chainName = getNetworkName(chainId);
-      
+
       // Load per-chain configuration with fallback to global defaults
       const enabled = this.env[`RELAYER_BACKWARD_SEARCH_ENABLED_${chainId}`];
       const lookback = this.env[`RELAYER_BACKWARD_SEARCH_LOOKBACK_${chainId}`];
@@ -436,16 +438,26 @@ export class RelayerConfig extends CommonConfig {
         assert(chainConfig.lookbackBlocks > 0, `lookbackBlocks must be > 0 for chain ${chainId}`);
         assert(chainConfig.maxEvents > 0, `maxEvents must be > 0 for chain ${chainId}`);
         assert(chainConfig.chunkSize > 0, `chunkSize must be > 0 for chain ${chainId}`);
-        assert(chainConfig.maxChunkSize >= chainConfig.chunkSize, 
-               `maxChunkSize must be >= chunkSize for chain ${chainId}`);
+        assert(
+          chainConfig.maxChunkSize >= chainConfig.chunkSize,
+          `maxChunkSize must be >= chunkSize for chain ${chainId}`
+        );
         assert(chainConfig.growthFactor >= 1.0, `growthFactor must be >= 1.0 for chain ${chainId}`);
         assert(chainConfig.maxTimeMs > 0, `maxTimeMs must be > 0 for chain ${chainId}`);
 
         this.backwardSearchConfigPerChain[chainId] = chainConfig;
 
         // Log chain-specific overrides
-        const hasOverrides = enabled || lookback || maxEvents || chunkSize || maxChunkSize || 
-                           growthFactor || cacheEnabled || maxTimeMs || useHybrid;
+        const hasOverrides =
+          enabled ||
+          lookback ||
+          maxEvents ||
+          chunkSize ||
+          maxChunkSize ||
+          growthFactor ||
+          cacheEnabled ||
+          maxTimeMs ||
+          useHybrid;
         if (hasOverrides && logger) {
           logger.debug({
             at: "RelayerConfig::loadPerChainBackwardSearchConfig",
@@ -480,17 +492,19 @@ export class RelayerConfig extends CommonConfig {
    * @returns Chain-specific backward search configuration
    */
   getBackwardSearchConfigForChain(chainId: number): ChainBackwardSearchConfig {
-    return this.backwardSearchConfigPerChain[chainId] || {
-      enabled: this.enableBackwardSearch,
-      lookbackBlocks: this.backwardSearchLookback,
-      maxEvents: this.backwardSearchMaxEvents,
-      chunkSize: this.backwardSearchChunkSize,
-      maxChunkSize: this.backwardSearchMaxChunkSize,
-      growthFactor: this.backwardSearchGrowthFactor,
-      cacheEnabled: this.backwardSearchCacheEnabled,
-      maxTimeMs: this.backwardSearchMaxTimeMs,
-      useHybridSearch: this.useHybridSearch,
-    };
+    return (
+      this.backwardSearchConfigPerChain[chainId] || {
+        enabled: this.enableBackwardSearch,
+        lookbackBlocks: this.backwardSearchLookback,
+        maxEvents: this.backwardSearchMaxEvents,
+        chunkSize: this.backwardSearchChunkSize,
+        maxChunkSize: this.backwardSearchMaxChunkSize,
+        growthFactor: this.backwardSearchGrowthFactor,
+        cacheEnabled: this.backwardSearchCacheEnabled,
+        maxTimeMs: this.backwardSearchMaxTimeMs,
+        useHybridSearch: this.useHybridSearch,
+      }
+    );
   }
 
   /**

@@ -15,7 +15,7 @@ describe("Per-Chain Backward Search Configuration", () => {
       level: "debug",
       transports: [new winston.transports.Console({ silent: true })],
     });
-    
+
     // Set up basic environment variables
     mockEnv = {
       HUB_CHAIN_ID: "1",
@@ -50,14 +50,14 @@ describe("Per-Chain Backward Search Configuration", () => {
         RELAYER_BACKWARD_SEARCH_LOOKBACK: "10000",
         RELAYER_BACKWARD_SEARCH_MAX_EVENTS: "1000",
         RELAYER_BACKWARD_SEARCH_CHUNK_SIZE: "500",
-        
+
         // Optimism (chainId: 10) specific overrides
         RELAYER_BACKWARD_SEARCH_ENABLED_10: "true",
         RELAYER_BACKWARD_SEARCH_LOOKBACK_10: "20000",
         RELAYER_BACKWARD_SEARCH_MAX_EVENTS_10: "2000",
         RELAYER_BACKWARD_SEARCH_CHUNK_SIZE_10: "1000",
         RELAYER_BACKWARD_SEARCH_USE_HYBRID_10: "true",
-        
+
         // Polygon (chainId: 137) specific overrides
         RELAYER_BACKWARD_SEARCH_ENABLED_137: "false", // Disabled for Polygon
         RELAYER_BACKWARD_SEARCH_LOOKBACK_137: "5000",
@@ -165,11 +165,11 @@ describe("Per-Chain Backward Search Configuration", () => {
         getBlockNumber: sinon.stub().resolves(2000),
         getBlock: sinon.stub().resolves({ timestamp: Math.floor(Date.now() / 1000) }),
       } as any;
-      
+
       mockSpokePool.address = "0x1234567890123456789012345678901234567890";
       mockSpokePool.signer = {} as any;
       mockSpokePool.interface = {
-        fragments: []
+        fragments: [],
       } as any;
 
       mockHubPoolClient = sinon.createStubInstance(clients.HubPoolClient);
@@ -328,19 +328,19 @@ describe("Per-Chain Backward Search Configuration", () => {
         // Global settings
         RELAYER_ENABLE_BACKWARD_SEARCH: "true",
         RELAYER_BACKWARD_SEARCH_LOOKBACK: "10000",
-        
+
         // Optimism specific - high performance settings
         RELAYER_BACKWARD_SEARCH_ENABLED_10: "true",
         RELAYER_BACKWARD_SEARCH_LOOKBACK_10: "20000",
         RELAYER_BACKWARD_SEARCH_CHUNK_SIZE_10: "2000",
         RELAYER_BACKWARD_SEARCH_USE_HYBRID_10: "true",
-        
+
         // Polygon specific - conservative settings
         RELAYER_BACKWARD_SEARCH_ENABLED_137: "true",
         RELAYER_BACKWARD_SEARCH_LOOKBACK_137: "5000",
         RELAYER_BACKWARD_SEARCH_CHUNK_SIZE_137: "200",
         RELAYER_BACKWARD_SEARCH_GROWTH_FACTOR_137: "1.2",
-        
+
         // Arbitrum specific - disabled
         RELAYER_BACKWARD_SEARCH_ENABLED_42161: "false",
       };
@@ -379,7 +379,7 @@ describe("Per-Chain Backward Search Configuration", () => {
         // Use a valid JSON for BLOCK_RANGE_END_BLOCK_BUFFER
         BLOCK_RANGE_END_BLOCK_BUFFER: '{"999": 10}',
       });
-      
+
       config.validate([999], logger); // Chain that doesn't exist
 
       const unknownChainConfig = config.getBackwardSearchConfigForChain(999);

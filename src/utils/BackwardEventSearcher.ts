@@ -7,14 +7,14 @@ import { getCurrentTime } from "./SDKUtils";
 import { paginatedEventQuery } from "./EventUtils";
 
 export interface BackwardSearchConfig {
-  targetBlock?: number;          // Stop at this block (inclusive)
-  maxEvents?: number;            // Stop after finding N events
-  maxBlocksBack?: number;        // Max distance to search backward
-  initialChunkSize: number;      // Start with this chunk size
-  maxChunkSize: number;          // Never exceed this chunk size
-  chunkGrowthFactor: number;     // Multiply chunk size by this when no events found
-  eventsToFind: string[];        // Event names to search for
-  cachePrefix?: string;          // Redis cache key prefix
+  targetBlock?: number; // Stop at this block (inclusive)
+  maxEvents?: number; // Stop after finding N events
+  maxBlocksBack?: number; // Max distance to search backward
+  initialChunkSize: number; // Start with this chunk size
+  maxChunkSize: number; // Never exceed this chunk size
+  chunkGrowthFactor: number; // Multiply chunk size by this when no events found
+  eventsToFind: string[]; // Event names to search for
+  cachePrefix?: string; // Redis cache key prefix
   filterArgs?: { [eventName: string]: any[] }; // Event filter arguments
 }
 
@@ -34,10 +34,7 @@ export class BackwardEventSearcher {
     private chainId: number
   ) {}
 
-  async searchBackward(
-    fromBlock: number,
-    config: BackwardSearchConfig
-  ): Promise<BackwardSearchResult> {
+  async searchBackward(fromBlock: number, config: BackwardSearchConfig): Promise<BackwardSearchResult> {
     const startTime = getCurrentTime() * 1000;
     const {
       targetBlock = 0,
@@ -48,7 +45,7 @@ export class BackwardEventSearcher {
       chunkGrowthFactor = 1.5,
       eventsToFind,
       cachePrefix = `backward-search-${this.chainId}`,
-      filterArgs = {}
+      filterArgs = {},
     } = config;
 
     assert(fromBlock >= targetBlock, "fromBlock must be >= targetBlock");
@@ -70,7 +67,7 @@ export class BackwardEventSearcher {
       minBlock,
       maxEvents,
       eventsToFind,
-      chainId: this.chainId
+      chainId: this.chainId,
     });
 
     while (currentBlock > minBlock && allEvents.length < maxEvents) {
@@ -90,26 +87,21 @@ export class BackwardEventSearcher {
           message: "Cache hit",
           chunkStart,
           chunkEnd,
-          eventCount: chunkEvents.length
+          eventCount: chunkEvents.length,
         });
       } else {
         // Fetch events for this chunk
-        chunkEvents = await this.fetchEventsForRange(
-          chunkStart,
-          chunkEnd,
-          eventsToFind,
-          filterArgs
-        );
+        chunkEvents = await this.fetchEventsForRange(chunkStart, chunkEnd, eventsToFind, filterArgs);
 
         // Cache the result (cache for 1 hour)
         await this.cacheEvents(cacheKey, chunkEvents, 3600);
-        
+
         this.logger.debug({
           at: "BackwardEventSearcher",
           message: "Fetched and cached events",
           chunkStart,
           chunkEnd,
-          eventCount: chunkEvents.length
+          eventCount: chunkEvents.length,
         });
       }
 
@@ -122,7 +114,7 @@ export class BackwardEventSearcher {
       });
 
       allEvents.push(...chunkEvents);
-      totalBlocksSearched += (chunkEnd - chunkStart + 1);
+      totalBlocksSearched += chunkEnd - chunkStart + 1;
 
       // Adaptive chunk sizing
       if (chunkEvents.length === 0) {
@@ -131,7 +123,7 @@ export class BackwardEventSearcher {
         this.logger.debug({
           at: "BackwardEventSearcher",
           message: "No events found, increasing chunk size",
-          newChunkSize: chunkSize
+          newChunkSize: chunkSize,
         });
       } else {
         // Events found, reset to smaller chunk size for precision
@@ -147,7 +139,7 @@ export class BackwardEventSearcher {
           at: "BackwardEventSearcher",
           message: "Reached max events limit",
           maxEvents,
-          foundEvents: allEvents.length
+          foundEvents: allEvents.length,
         });
         break;
       }
@@ -165,7 +157,7 @@ export class BackwardEventSearcher {
     });
 
     const searchTimeMs = getCurrentTime() * 1000 - startTime;
-    
+
     this.logger.info({
       at: "BackwardEventSearcher",
       message: "Backward search completed",
@@ -175,7 +167,7 @@ export class BackwardEventSearcher {
       totalBlocksSearched,
       cacheHits,
       searchTimeMs: Math.round(searchTimeMs),
-      chainId: this.chainId
+      chainId: this.chainId,
     });
 
     return {
@@ -183,7 +175,7 @@ export class BackwardEventSearcher {
       searchedToBlock: currentBlock + 1,
       totalBlocksSearched,
       cacheHits,
-      searchTimeMs
+      searchTimeMs,
     };
   }
 
@@ -200,18 +192,14 @@ export class BackwardEventSearcher {
         // Create event filter with optional arguments
         const args = filterArgs[eventName] || [];
         const filter = this.contract.filters[eventName](...args);
-        
+
         // Use existing paginated query logic for robust querying
-        const eventLogs = await paginatedEventQuery(
-          this.contract,
-          filter,
-          {
-            from: fromBlock,
-            to: toBlock,
-            maxLookBack: toBlock - fromBlock + 1
-          }
-        );
-        
+        const eventLogs = await paginatedEventQuery(this.contract, filter, {
+          from: fromBlock,
+          to: toBlock,
+          maxLookBack: toBlock - fromBlock + 1,
+        });
+
         events.push(...eventLogs);
       } catch (error) {
         this.logger.warn({
@@ -220,9 +208,9 @@ export class BackwardEventSearcher {
           eventName,
           fromBlock,
           toBlock,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
-        
+
         // Retry with smaller range if it's a large range
         if (toBlock - fromBlock > 1000) {
           const midBlock = Math.floor((fromBlock + toBlock) / 2);
@@ -237,7 +225,7 @@ export class BackwardEventSearcher {
             eventName,
             fromBlock,
             toBlock,
-            error: error instanceof Error ? error.message : String(error)
+            error: error instanceof Error ? error.message : String(error),
           });
         }
       }
@@ -247,8 +235,10 @@ export class BackwardEventSearcher {
   }
 
   private async getCachedEvents(cacheKey: string): Promise<Log[] | null> {
-    if (!this.cache) return null;
-    
+    if (!this.cache) {
+      return null;
+    }
+
     try {
       const cached = await this.cache.get(cacheKey);
       if (cached) {
@@ -261,14 +251,16 @@ export class BackwardEventSearcher {
         at: "BackwardEventSearcher",
         message: "Cache read failed",
         cacheKey,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
       return null;
     }
   }
 
   private async cacheEvents(cacheKey: string, events: Log[], ttlSeconds: number): Promise<void> {
-    if (!this.cache) return;
+    if (!this.cache) {
+      return;
+    }
 
     try {
       await this.cache.set(cacheKey, JSON.stringify(events), ttlSeconds);
@@ -277,27 +269,24 @@ export class BackwardEventSearcher {
         at: "BackwardEventSearcher",
         message: "Cache write failed",
         cacheKey,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
    * Find the most recent event of specified types within a block range
    */
-  async findMostRecentEvent(
-    fromBlock: number,
-    config: Omit<BackwardSearchConfig, 'maxEvents'>
-  ): Promise<Log | null> {
+  async findMostRecentEvent(fromBlock: number, config: Omit<BackwardSearchConfig, "maxEvents">): Promise<Log | null> {
     const result = await this.searchBackward(fromBlock, {
       ...config,
-      maxEvents: 1
+      maxEvents: 1,
     });
-    
+
     return result.events.length > 0 ? result.events[0] : null;
   }
 
@@ -307,18 +296,18 @@ export class BackwardEventSearcher {
   async findEventsInTimeWindow(
     fromBlock: number,
     maxAgeSeconds: number,
-    config: Omit<BackwardSearchConfig, 'targetBlock' | 'maxBlocksBack'>
+    config: Omit<BackwardSearchConfig, "targetBlock" | "maxBlocksBack">
   ): Promise<BackwardSearchResult> {
     const currentBlockTime = await this.getBlockTimestamp(fromBlock);
     const targetTimestamp = currentBlockTime - maxAgeSeconds;
-    
+
     // Estimate blocks based on ~12 second block time
     const estimatedBlocksBack = Math.ceil(maxAgeSeconds / 12);
-    
+
     return this.searchBackward(fromBlock, {
       ...config,
       maxBlocksBack: estimatedBlocksBack * 2, // Add buffer for block time variance
-      targetBlock: Math.max(0, fromBlock - estimatedBlocksBack * 3) // Even more conservative target
+      targetBlock: Math.max(0, fromBlock - estimatedBlocksBack * 3), // Even more conservative target
     });
   }
 
@@ -331,7 +320,7 @@ export class BackwardEventSearcher {
         at: "BackwardEventSearcher",
         message: "Failed to get block timestamp",
         blockNumber,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
       // Return current time as fallback
       return getCurrentTime();

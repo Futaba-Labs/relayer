@@ -43,8 +43,8 @@ export interface EnhancedSpokePoolUpdateResult {
 
 export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
   private backwardSearcher: BackwardEventSearcher;
-  private lastBackwardSearchTime: number = 0;
-  private consecutiveFailures: number = 0;
+  private lastBackwardSearchTime = 0;
+  private consecutiveFailures = 0;
   private readonly maxConsecutiveFailures = 3;
   private chainConfig?: any; // Will store chain-specific backward search config
 
@@ -60,7 +60,7 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
     readonly opts: IndexerOpts
   ) {
     super(logger, spokePool, hubPoolClient, chainId, deploymentBlock, eventSearchConfig, opts);
-    
+
     this.initializeBackwardSearcher();
   }
 
@@ -97,24 +97,14 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
   private async initializeBackwardSearcher(): Promise<void> {
     try {
       const cache = await getRedisCache(this.logger);
-      this.backwardSearcher = new BackwardEventSearcher(
-        this.spokePool,
-        cache,
-        this.logger,
-        this.chainId
-      );
+      this.backwardSearcher = new BackwardEventSearcher(this.spokePool, cache, this.logger, this.chainId);
     } catch (error) {
       this.logger.warn({
         at: "EnhancedSpokePoolClient",
         message: "Failed to initialize cache for backward searcher, proceeding without cache",
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
-      this.backwardSearcher = new BackwardEventSearcher(
-        this.spokePool,
-        undefined,
-        this.logger,
-        this.chainId
-      );
+      this.backwardSearcher = new BackwardEventSearcher(this.spokePool, undefined, this.logger, this.chainId);
     }
   }
 
@@ -127,42 +117,42 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
   ): Promise<EnhancedSpokePoolUpdateResult> {
     // Merge options with chain-specific configuration
     const mergedOptions = this.mergeOptionsWithChainConfig(options);
-    
+
     const {
       useAdaptiveSearch = false,
       lookbackBlocks = 10000,
       maxEvents = 1000,
       maxSearchTimeMs = 30000,
       targetBlock,
-      filterArgs = {}
+      filterArgs = {},
     } = mergedOptions;
 
     if (!useAdaptiveSearch || this.shouldUseFallbackMethod()) {
       // Use standard forward search
       const result = await this._update(eventsToQuery);
       if (result.success) {
-        return { 
+        return {
           success: true,
           currentTime: result.currentTime,
           searchEndBlock: result.searchEndBlock,
           events: result.events,
-          searchMethod: "forward" 
+          searchMethod: "forward",
         };
       } else {
         return {
           success: false,
           reason: (result as any).reason?.toString(),
-          searchMethod: "forward"
+          searchMethod: "forward",
         };
       }
     }
 
     try {
       const latestBlock = await this.spokePool.provider.getBlockNumber();
-      
+
       // Determine if we should use backward search
       const shouldUseBackward = this.shouldUseBackwardSearch(latestBlock);
-      
+
       if (shouldUseBackward) {
         return await this.performBackwardSearch(eventsToQuery, latestBlock, options);
       } else {
@@ -173,24 +163,24 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
         at: "EnhancedSpokePoolClient",
         message: "Backward search failed, falling back to forward search",
         error: error instanceof Error ? error.message : String(error),
-        chainId: this.chainId
+        chainId: this.chainId,
       });
-      
+
       this.consecutiveFailures++;
       const result = await this._update(eventsToQuery);
       if (result.success) {
-        return { 
+        return {
           success: true,
           currentTime: result.currentTime,
           searchEndBlock: result.searchEndBlock,
           events: result.events,
-          searchMethod: "forward" 
+          searchMethod: "forward",
         };
       } else {
         return {
           success: false,
           reason: (result as any).reason?.toString(),
-          searchMethod: "forward"
+          searchMethod: "forward",
         };
       }
     }
@@ -210,14 +200,14 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       maxChunkSize: options.maxChunkSize || 5000,
       chunkGrowthFactor: options.growthFactor || 2.0,
       filterArgs: options.filterArgs || {},
-      cachePrefix: `enhanced-spoke-${this.chainId}`
+      cachePrefix: `enhanced-spoke-${this.chainId}`,
     };
 
     const searchResult = await this.backwardSearcher.searchBackward(latestBlock, searchConfig);
-    
+
     // Process the found events
     this.processBackwardSearchResults(searchResult.events, eventsToQuery);
-    
+
     this.lastBackwardSearchTime = getCurrentTime();
     this.consecutiveFailures = 0; // Reset on success
 
@@ -227,7 +217,7 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       searchEndBlock: latestBlock,
       events: this.formatEventsForUpdate(searchResult.events, eventsToQuery),
       backwardSearchResult: searchResult,
-      searchMethod: "backward"
+      searchMethod: "backward",
     };
   }
 
@@ -250,7 +240,7 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       maxChunkSize: options.maxChunkSize ? Math.floor(options.maxChunkSize / 2) : 1000,
       chunkGrowthFactor: options.growthFactor || 1.5,
       filterArgs: options.filterArgs || {},
-      cachePrefix: `hybrid-recent-${this.chainId}`
+      cachePrefix: `hybrid-recent-${this.chainId}`,
     };
 
     const recentSearchResult = await this.backwardSearcher.searchBackward(latestBlock, recentSearchConfig);
@@ -265,7 +255,7 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
         if (Array.isArray(eventArray)) {
           // Convert each event to Log format
           eventArray.forEach((event: any) => {
-            if (event && typeof event === 'object') {
+            if (event && typeof event === "object") {
               allEvents.push(event);
             }
           });
@@ -286,7 +276,7 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       searchEndBlock: latestBlock,
       events: this.formatEventsForUpdate(uniqueEvents, eventsToQuery),
       backwardSearchResult: recentSearchResult,
-      searchMethod: "hybrid"
+      searchMethod: "hybrid",
     };
   }
 
@@ -339,15 +329,13 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
   private formatEventsForUpdate(events: Log[], eventsToQuery: string[]): any[][] {
     // Format events according to the existing SpokePoolUpdate interface
     return eventsToQuery.map((eventName) => {
-      return events
-        .filter(event => event.event === eventName)
-        .map(spreadEventWithBlockNumber);
+      return events.filter((event) => event.event === eventName).map(spreadEventWithBlockNumber);
     });
   }
 
   private deduplicateEvents(events: Log[]): Log[] {
     const seen = new Set<string>();
-    return events.filter(event => {
+    return events.filter((event) => {
       // Create a unique key for each event
       const key = `${event.blockNumber}-${event.transactionHash}-${event.logIndex}`;
       if (seen.has(key)) {
@@ -361,10 +349,7 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
   /**
    * Find the most recent deposit event within a specified block range
    */
-  async findMostRecentDeposit(
-    maxBlocksBack: number = 5000,
-    depositorAddress?: string
-  ): Promise<DepositWithBlock | null> {
+  async findMostRecentDeposit(maxBlocksBack = 5000, depositorAddress?: string): Promise<DepositWithBlock | null> {
     const latestBlock = await this.spokePool.provider.getBlockNumber();
     const filterArgs = depositorAddress ? { FundsDeposited: [depositorAddress] } : {};
 
@@ -374,10 +359,12 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       initialChunkSize: 100,
       maxChunkSize: 1000,
       chunkGrowthFactor: 2,
-      filterArgs
+      filterArgs,
     });
 
-    if (!result) return null;
+    if (!result) {
+      return null;
+    }
 
     return {
       ...spreadEventWithBlockNumber(result),
@@ -388,10 +375,7 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
   /**
    * Find all deposits for a specific token within a time window
    */
-  async findRecentDepositsForToken(
-    tokenAddress: string,
-    maxAgeSeconds: number = 3600
-  ): Promise<DepositWithBlock[]> {
+  async findRecentDepositsForToken(tokenAddress: string, maxAgeSeconds = 3600): Promise<DepositWithBlock[]> {
     const latestBlock = await this.spokePool.provider.getBlockNumber();
 
     const result = await this.backwardSearcher.findEventsInTimeWindow(latestBlock, maxAgeSeconds, {
@@ -401,16 +385,19 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
       maxChunkSize: 2000,
       chunkGrowthFactor: 1.8,
       filterArgs: {
-        FundsDeposited: [null, null, tokenAddress] // [depositor, recipient, inputToken]
-      }
+        FundsDeposited: [null, null, tokenAddress], // [depositor, recipient, inputToken]
+      },
     });
 
     return result.events
-      .filter(event => event.event === "FundsDeposited")
-      .map(event => ({
-        ...spreadEventWithBlockNumber(event),
-        messageHash: event.args.messageHash ?? getMessageHash(event.args.message),
-      } as DepositWithBlock));
+      .filter((event) => event.event === "FundsDeposited")
+      .map(
+        (event) =>
+          ({
+            ...spreadEventWithBlockNumber(event),
+            messageHash: event.args.messageHash ?? getMessageHash(event.args.message),
+          } as DepositWithBlock)
+      );
   }
 
   /**
@@ -418,7 +405,7 @@ export class EnhancedSpokePoolClient extends IndexedSpokePoolClient {
    */
   override async update(eventsToQuery?: string[]): Promise<void> {
     const events = eventsToQuery || this._queryableEventNames();
-    
+
     // For now, keep the standard behavior by default
     // Users can explicitly call updateWithBackwardSearch for enhanced functionality
     await this._update(events);

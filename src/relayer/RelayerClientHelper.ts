@@ -38,7 +38,7 @@ async function indexedSpokePoolClient(
   hubPoolClient: HubPoolClient,
   chainId: number,
   opts: IndexerOpts & { lookback: number; blockRange: number },
-  enableBackwardSearch: boolean = false,
+  enableBackwardSearch = false,
   chainConfig?: any
 ): Promise<IndexedSpokePoolClient | EnhancedSpokePoolClient> {
   const { logger } = hubPoolClient;
@@ -67,12 +67,12 @@ async function indexedSpokePoolClient(
       eventSearchConfig,
       opts
     );
-    
+
     // Set chain-specific configuration if provided
     if (chainConfig) {
       spokePoolClient.setChainConfig(chainConfig);
     }
-    
+
     return spokePoolClient;
   } else {
     const spokePoolClient = new IndexedSpokePoolClient(
@@ -112,6 +112,9 @@ export async function constructRelayerClients(
       : undefined;
 
   let spokePoolClients: SpokePoolClientsByChain;
+  console.log("config.isBackwardSearchEnabledForChain(chainId)", config.isBackwardSearchEnabledForChain(1));
+  console.log("config.getBackwardSearchConfigForChain(chainId)", config.getBackwardSearchConfigForChain(1));
+
   if (config.externalListener) {
     spokePoolClients = Object.fromEntries(
       await sdkUtils.mapAsync(enabledChains ?? configStoreClient.getEnabledChains(), async (chainId) => {
@@ -120,14 +123,18 @@ export async function constructRelayerClients(
           blockRange: config.maxBlockLookBack[chainId],
           path: config.listenerPath[chainId],
         };
-        return [chainId, await indexedSpokePoolClient(
-          baseSigner, 
-          hubPoolClient, 
-          chainId, 
-          opts, 
-          config.isBackwardSearchEnabledForChain(chainId),
-          config.getBackwardSearchConfigForChain(chainId)
-        )];
+
+        return [
+          chainId,
+          await indexedSpokePoolClient(
+            baseSigner,
+            hubPoolClient,
+            chainId,
+            opts,
+            config.isBackwardSearchEnabledForChain(chainId),
+            config.getBackwardSearchConfigForChain(chainId)
+          ),
+        ];
       })
     );
   } else {

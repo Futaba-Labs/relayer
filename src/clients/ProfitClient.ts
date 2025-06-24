@@ -1,5 +1,7 @@
 import { Provider } from "@ethersproject/abstract-provider";
 import { utils as ethersUtils } from "ethers";
+import * as fs from "fs";
+import * as path from "path";
 import {
   constants as sdkConsts,
   priceClient,
@@ -85,6 +87,28 @@ type UnprofitableFill = {
   gasCost: BigNumber;
 };
 
+// Dynamic gas calculation types
+export interface Intent {
+  outputAmount: number;
+  baseFee: number;
+  profitBps: number;
+  srcChainId: number;
+  dstChainId: number;
+  tokenSymbol: string;
+  timestamp?: number;
+}
+
+export interface OptimalGasResult {
+  gasPrice: BigNumber;
+  maxFeePerGas: BigNumber;
+  maxPriorityFeePerGas: BigNumber;
+  gasUsed: BigNumber;
+  baseFeePerGas: BigNumber;
+  relayerFee: BigNumber;
+  profitBps: number;
+  isOptimal: boolean;
+}
+
 // @dev This address is known on each chain and has previously been used to simulate Deposit gas costs.
 // Since _some_ known recipient address is needed for simulating a fill, default to this one. nb. Since
 // the SpokePool implements custom behaviour when relayer === recipient, it's important not to use the
@@ -106,6 +130,12 @@ export class ProfitClient {
 
   // Queries needed to fetch relay gas costs.
   private relayerFeeQueries: { [chainId: number]: relayFeeCalculator.QueryInterface } = {};
+
+  // Dynamic gas calculation properties
+  private intentHistory: Intent[] = [];
+  private readonly minOutputAmount = toBNWei("0.01"); // 0.01 ETH minimum
+  private lastIntentLoad = 0;
+  private readonly intentCacheTime = 60 * 1000; // 1 minute cache
 
   private readonly isTestnet: boolean;
 
@@ -477,6 +507,135 @@ export class ProfitClient {
     return fill;
   }
 
+  // Enhanced fill profitability method with optional dynamic gas calculation
+  async getFillProfitabilityWithOptimalGas(
+    deposit: Deposit,
+    lpFeePct: BigNumber,
+    l1Token: string,
+    repaymentChainId: number,
+    useOptimalGas = true
+  ): Promise<FillProfit & { optimalGas?: OptimalGasResult }> {
+    // Start with standard profitability calculation
+    const standardResult = await this.getFillProfitability(deposit, lpFeePct, l1Token, repaymentChainId);
+
+    // If not using optimal gas or standard calculation is unprofitable, return standard result
+    if (!useOptimalGas || !standardResult.profitable) {
+      return standardResult;
+    }
+
+    try {
+      // Try to calculate optimal gas based on historical data
+      const optimalGasResult = await this.calculateOptimalGas(
+        deposit,
+        standardResult.gasPrice.sub(standardResult.gasPrice.div(3)), // Estimate base fee as ~67% of total gas price
+        standardResult.nativeGasCost,
+        standardResult.grossRelayerFeeUsd
+      );
+
+      if (optimalGasResult && optimalGasResult.isOptimal) {
+        this.logger.debug({
+          at: "ProfitClient#getFillProfitabilityWithOptimalGas",
+          message: "Using optimal gas calculation",
+          deposit: deposit.depositId.toString(),
+          standardGasPrice: formatGwei(standardResult.gasPrice.toString()),
+          optimalGasPrice: formatGwei(optimalGasResult.gasPrice.toString()),
+          profitBps: optimalGasResult.profitBps,
+          isOptimal: optimalGasResult.isOptimal,
+        });
+
+        // Recalculate profitability with optimal gas parameters
+        const optimizedResult = await this.calculateFillProfitabilityWithGas(deposit, lpFeePct, optimalGasResult);
+
+        return {
+          ...optimizedResult,
+          optimalGas: optimalGasResult,
+        };
+      }
+    } catch (error) {
+      this.logger.debug({
+        at: "ProfitClient#getFillProfitabilityWithOptimalGas",
+        message: "Failed to calculate optimal gas, using standard calculation",
+        error: error instanceof Error ? error.message : String(error),
+        deposit: deposit.depositId.toString(),
+      });
+    }
+
+    // Fallback to standard calculation
+    return standardResult;
+  }
+
+  // Helper method to recalculate profitability with specific gas parameters
+  private async calculateFillProfitabilityWithGas(
+    deposit: Deposit,
+    lpFeePct: BigNumber,
+    gasResult: OptimalGasResult
+  ): Promise<FillProfit> {
+    const { hubPoolClient } = this;
+
+    const inputTokenInfo = hubPoolClient.getTokenInfoForAddress(deposit.inputToken, deposit.originChainId);
+    const inputTokenPriceUsd = this.getPriceOfToken(inputTokenInfo.symbol);
+    const inputTokenScalar = toBNWei(1, 18 - inputTokenInfo.decimals);
+    const scaledInputAmount = deposit.inputAmount.mul(inputTokenScalar);
+    const inputAmountUsd = scaledInputAmount.mul(inputTokenPriceUsd).div(fixedPoint);
+
+    const { symbol: outputTokenSymbol, decimals: outputTokenDecimals } = hubPoolClient.getTokenInfoForAddress(
+      deposit.outputToken,
+      deposit.destinationChainId
+    );
+    const outputTokenPriceUsd = this.getPriceOfToken(outputTokenSymbol);
+    const outputTokenScalar = toBNWei(1, 18 - outputTokenDecimals);
+    const effectiveOutputAmount = min(deposit.outputAmount, deposit.updatedOutputAmount ?? deposit.outputAmount);
+    const scaledOutputAmount = effectiveOutputAmount.mul(outputTokenScalar);
+    const outputAmountUsd = scaledOutputAmount.mul(outputTokenPriceUsd).div(fixedPoint);
+
+    const totalFeePct = inputAmountUsd.sub(outputAmountUsd).mul(fixedPoint).div(inputAmountUsd);
+
+    const scaledLpFeeAmount = scaledInputAmount.mul(lpFeePct).div(fixedPoint);
+    const lpFeeUsd = scaledLpFeeAmount.mul(inputTokenPriceUsd).div(fixedPoint);
+
+    const grossRelayerFeeUsd = inputAmountUsd.sub(outputAmountUsd).sub(lpFeeUsd);
+    const grossRelayerFeePct = grossRelayerFeeUsd.gt(bnZero)
+      ? grossRelayerFeeUsd.mul(fixedPoint).div(inputAmountUsd)
+      : bnZero;
+
+    // Use optimal gas parameters instead of estimated fill cost
+    const gasToken = this.resolveGasToken(deposit.destinationChainId);
+    const gasTokenPriceUsd = this.getPriceOfToken(gasToken.symbol);
+    const tokenGasCost = gasResult.gasUsed.mul(gasResult.gasPrice);
+    const gasCostUsd = tokenGasCost.mul(gasTokenPriceUsd).div(bn10.pow(gasToken.decimals));
+
+    const netRelayerFeeUsd = grossRelayerFeeUsd.sub(gasCostUsd);
+    const netRelayerFeePct = outputAmountUsd.gt(bnZero)
+      ? netRelayerFeeUsd.mul(fixedPoint).div(outputAmountUsd)
+      : bnZero;
+
+    const symbol = this.getTokenSymbol(deposit.inputToken, deposit.originChainId);
+    const minRelayerFeePct = this.minRelayerFeePct(symbol, deposit.originChainId, deposit.destinationChainId);
+
+    const profitable =
+      inputTokenPriceUsd.gt(bnZero) && outputTokenPriceUsd.gt(bnZero) && netRelayerFeePct.gte(minRelayerFeePct);
+
+    return {
+      totalFeePct,
+      inputTokenPriceUsd,
+      inputAmountUsd,
+      outputTokenPriceUsd,
+      outputAmountUsd,
+      grossRelayerFeePct,
+      grossRelayerFeeUsd,
+      nativeGasCost: gasResult.gasUsed,
+      tokenGasCost,
+      gasPrice: gasResult.gasPrice,
+      gasPadding: this.gasPadding,
+      gasMultiplier: this.resolveGasMultiplier(deposit),
+      gasTokenPriceUsd,
+      gasCostUsd,
+      netRelayerFeePct,
+      netRelayerFeeUsd,
+      profitable,
+    };
+  }
+
   async isFillProfitable(
     deposit: Deposit,
     lpFeePct: BigNumber,
@@ -534,8 +693,342 @@ export class ProfitClient {
     return Object.keys(this.unprofitableFills).length != 0;
   }
 
+  // Intent history management methods
+  private async loadIntentHistory(): Promise<void> {
+    const now = getCurrentTime();
+    if (now - this.lastIntentLoad < this.intentCacheTime && this.intentHistory.length > 0) {
+      return; // Use cached data
+    }
+
+    try {
+      const intentsPath = path.join(process.cwd(), "intents.json");
+      if (fs.existsSync(intentsPath)) {
+        const data = JSON.parse(fs.readFileSync(intentsPath, "utf8"));
+        this.intentHistory = Array.isArray(data) ? data.filter(this.isValidIntent) : [];
+        this.lastIntentLoad = now;
+
+        this.logger.debug({
+          at: "ProfitClient#loadIntentHistory",
+          message: `Loaded ${this.intentHistory.length} intent records`,
+        });
+      } else {
+        this.intentHistory = [];
+        this.logger.debug({
+          at: "ProfitClient#loadIntentHistory",
+          message: "No intents.json file found, using empty intent history",
+        });
+      }
+    } catch (error) {
+      this.logger.warn({
+        at: "ProfitClient#loadIntentHistory",
+        message: "Failed to load intent history",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      this.intentHistory = [];
+    }
+  }
+
+  private isValidIntent = (intent: any): intent is Intent => {
+    return (
+      typeof intent.outputAmount === "number" &&
+      typeof intent.baseFee === "number" &&
+      typeof intent.profitBps === "number" &&
+      typeof intent.srcChainId === "number" &&
+      typeof intent.dstChainId === "number" &&
+      typeof intent.tokenSymbol === "string" &&
+      intent.outputAmount > 0 &&
+      intent.baseFee >= 0 &&
+      !isNaN(intent.profitBps)
+    );
+  };
+
+  // Multi-stage filtering algorithm
+  private filterRelevantIntents(deposit: Deposit, baseFee: BigNumber): Intent[] {
+    const { originChainId, destinationChainId, outputAmount, outputToken } = deposit;
+    const tokenSymbol = this.getTokenSymbol(outputToken, destinationChainId);
+    const targetAmount = Number(outputAmount.toString());
+    const targetBaseFee = Number(baseFee.toString());
+
+    this.logger.debug({
+      at: "ProfitClient#filterRelevantIntents",
+      message: "Starting intent filtering",
+      originChainId,
+      destinationChainId,
+      tokenSymbol,
+      targetAmount,
+      targetBaseFee,
+      totalIntents: this.intentHistory.length,
+    });
+
+    // Step 1: Filter by chain IDs
+    const chainFiltered = this.intentHistory.filter(
+      (intent) => intent.srcChainId === originChainId && intent.dstChainId === destinationChainId
+    );
+
+    if (chainFiltered.length === 0) {
+      this.logger.debug({
+        at: "ProfitClient#filterRelevantIntents",
+        message: `No intents found for chain pair ${originChainId} -> ${destinationChainId}`,
+      });
+      return [];
+    }
+
+    // Step 2: Filter by token symbol
+    const tokenFiltered = chainFiltered.filter((intent) => intent.tokenSymbol === tokenSymbol);
+
+    if (tokenFiltered.length === 0) {
+      this.logger.debug({
+        at: "ProfitClient#filterRelevantIntents",
+        message: `No intents found for token ${tokenSymbol}`,
+      });
+      return [];
+    }
+
+    // Step 3: Sort by amount proximity and take top 100
+    const amountSorted = tokenFiltered
+      .sort((a, b) => {
+        const diffA = Math.abs(a.outputAmount - targetAmount);
+        const diffB = Math.abs(b.outputAmount - targetAmount);
+        return diffA - diffB;
+      })
+      .slice(0, 100);
+
+    // Step 4: Sort by base fee proximity and take top 30
+    const baseFeeFiltered = amountSorted
+      .sort((a, b) => {
+        const diffA = Math.abs(a.baseFee - targetBaseFee);
+        const diffB = Math.abs(b.baseFee - targetBaseFee);
+        return diffA - diffB;
+      })
+      .slice(0, 30);
+
+    this.logger.debug({
+      at: "ProfitClient#filterRelevantIntents",
+      message: "Filtering completed",
+      chainFiltered: chainFiltered.length,
+      tokenFiltered: tokenFiltered.length,
+      amountSorted: amountSorted.length,
+      finalFiltered: baseFeeFiltered.length,
+    });
+
+    return baseFeeFiltered;
+  }
+
+  // Calculate dynamic profit BPS based on historical data
+  private calculateDynamicProfitBps(relevantIntents: Intent[], deposit: Deposit, isExclusive: boolean): number {
+    if (relevantIntents.length === 0) {
+      return 0;
+    }
+
+    // Calculate average profit BPS from historical data
+    const avgProfitBps = relevantIntents.reduce((sum, intent) => sum + intent.profitBps, 0) / relevantIntents.length;
+
+    this.logger.debug({
+      at: "ProfitClient#calculateDynamicProfitBps",
+      message: "Historical profit analysis",
+      avgProfitBps,
+      intentCount: relevantIntents.length,
+      isExclusive,
+    });
+
+    // Apply order type adjustments based on optimal-gas-calc.md
+    let adjustedProfitBps = avgProfitBps;
+
+    if (isExclusive) {
+      // Exclusive orders: use full historical average (100%)
+      adjustedProfitBps = avgProfitBps * 1.0;
+    } else {
+      // Non-exclusive orders: adjust for competition
+      if (deposit.destinationChainId === CHAIN_IDs.MAINNET) {
+        adjustedProfitBps = avgProfitBps * 0.65; // Mainnet: 65% due to higher competition
+      } else {
+        adjustedProfitBps = avgProfitBps * 0.8; // L2s: 80% due to moderate competition
+      }
+    }
+
+    return Math.max(adjustedProfitBps, 0.5); // Minimum 0.5 BPS as safety floor
+  }
+
+  // Helper to check if deposit is in exclusive period
+  private fillIsExclusive(deposit: Deposit): boolean {
+    // Note: We don't have direct access to spokePoolClients here, so we use a simple timestamp check
+    // In practice, this method might need to be called from Relayer or passed as parameter
+    const currentTime = getCurrentTime();
+    return deposit.exclusivityDeadline >= currentTime;
+  }
+
+  // Convert token value to ETH for gas calculations
+  private async convertToEth(amount: BigNumber, tokenAddress: string, chainId: number): Promise<BigNumber> {
+    try {
+      const tokenSymbol = this.getTokenSymbol(tokenAddress, chainId);
+      const tokenPrice = this.getPriceOfToken(tokenSymbol);
+      const ethPrice = this.getPriceOfToken("ETH");
+
+      if (tokenPrice.eq(bnZero) || ethPrice.eq(bnZero)) {
+        throw new Error(`Price not available for ${tokenSymbol} or ETH`);
+      }
+
+      const tokenInfo = getTokenInfo(tokenAddress, chainId);
+      const ethInfo = getTokenInfo(getDeployedAddress("WETH", chainId), chainId);
+
+      // Convert: amount * tokenPrice / ethPrice, accounting for decimals
+      return amount
+        .mul(tokenPrice)
+        .div(ethPrice)
+        .mul(toBN(10).pow(ethInfo.decimals))
+        .div(toBN(10).pow(tokenInfo.decimals));
+    } catch (error) {
+      this.logger.warn({
+        at: "ProfitClient#convertToEth",
+        message: "Failed to convert token to ETH",
+        tokenAddress,
+        chainId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  // Main optimal gas calculation method
+  async calculateOptimalGas(
+    deposit: Deposit,
+    baseFee: BigNumber,
+    gasUsed: BigNumber,
+    relayerFee: BigNumber
+  ): Promise<OptimalGasResult | null> {
+    // Minimum amount check (0.01 ETH equivalent)
+    if (deposit.outputAmount.lt(this.minOutputAmount)) {
+      this.logger.debug({
+        at: "ProfitClient#calculateOptimalGas",
+        message: "Output amount below minimum threshold",
+        outputAmount: deposit.outputAmount.toString(),
+        minAmount: this.minOutputAmount.toString(),
+      });
+      return null;
+    }
+
+    // Ensure intent history is loaded
+    await this.loadIntentHistory();
+
+    // Filter relevant historical data
+    const relevantIntents = this.filterRelevantIntents(deposit, baseFee);
+
+    if (relevantIntents.length === 0) {
+      this.logger.debug({
+        at: "ProfitClient#calculateOptimalGas",
+        message: "No relevant intent history found, falling back to static calculation",
+      });
+      return null; // Fallback to existing static calculation
+    }
+
+    // Calculate dynamic profit BPS
+    const isExclusive = this.fillIsExclusive(deposit);
+    const profitBps = this.calculateDynamicProfitBps(relevantIntents, deposit, isExclusive);
+
+    if (profitBps <= 0) {
+      this.logger.debug({
+        at: "ProfitClient#calculateOptimalGas",
+        message: "Calculated profit BPS is too low",
+        profitBps,
+      });
+      return null;
+    }
+
+    // Calculate target profit in token units
+    const targetProfitBasisPoints = Math.ceil(profitBps * 100); // Convert to basis points for calculation
+    const targetProfit = deposit.outputAmount.mul(targetProfitBasisPoints).div(1000000); // Divide by 1M since we multiplied by 100 above
+
+    this.logger.debug({
+      at: "ProfitClient#calculateOptimalGas",
+      message: "Target profit calculation",
+      profitBps,
+      targetProfitBasisPoints,
+      targetProfit: targetProfit.toString(),
+      relayerFee: relayerFee.toString(),
+    });
+
+    // Calculate available gas budget
+    const gasValueInToken = relayerFee.sub(targetProfit);
+
+    if (gasValueInToken.lte(bnZero)) {
+      this.logger.debug({
+        at: "ProfitClient#calculateOptimalGas",
+        message: "Insufficient relayer fee to cover target profit",
+        relayerFee: relayerFee.toString(),
+        targetProfit: targetProfit.toString(),
+      });
+      return null;
+    }
+
+    try {
+      // Convert gas budget to ETH
+      const gasValueInEth = await this.convertToEth(gasValueInToken, deposit.outputToken, deposit.destinationChainId);
+
+      // Calculate gas price
+      const gasPrice = gasValueInEth.div(gasUsed);
+      const maxPriorityFeePerGas = gasPrice.sub(baseFee);
+
+      // Handle negative priority fee case
+      if (maxPriorityFeePerGas.lt(bnZero)) {
+        const minPriorityFee =
+          deposit.destinationChainId === CHAIN_IDs.MAINNET
+            ? toBNWei("0.01", 9) // 0.01 Gwei for mainnet
+            : toBNWei("0.0005", 9); // 0.0005 Gwei for L2s
+
+        this.logger.debug({
+          at: "ProfitClient#calculateOptimalGas",
+          message: "Priority fee would be negative, using minimum",
+          calculatedPriorityFee: maxPriorityFeePerGas.toString(),
+          minPriorityFee: minPriorityFee.toString(),
+        });
+
+        return {
+          gasPrice: baseFee.add(minPriorityFee),
+          maxFeePerGas: baseFee.mul(2).add(minPriorityFee),
+          maxPriorityFeePerGas: minPriorityFee,
+          gasUsed,
+          baseFeePerGas: baseFee,
+          relayerFee,
+          profitBps,
+          isOptimal: false,
+        };
+      }
+
+      const maxFeePerGas = baseFee.mul(2).add(maxPriorityFeePerGas);
+
+      this.logger.debug({
+        at: "ProfitClient#calculateOptimalGas",
+        message: "Optimal gas calculation successful",
+        gasPrice: gasPrice.toString(),
+        maxFeePerGas: maxFeePerGas.toString(),
+        maxPriorityFeePerGas: maxPriorityFeePerGas.toString(),
+        profitBps,
+        isOptimal: true,
+      });
+
+      return {
+        gasPrice,
+        maxFeePerGas,
+        maxPriorityFeePerGas,
+        gasUsed,
+        baseFeePerGas: baseFee,
+        relayerFee,
+        profitBps,
+        isOptimal: true,
+      };
+    } catch (error) {
+      this.logger.warn({
+        at: "ProfitClient#calculateOptimalGas",
+        message: "Failed to calculate optimal gas",
+        error: error instanceof Error ? error.message : String(error),
+        deposit,
+      });
+      return null;
+    }
+  }
+
   async update(): Promise<void> {
-    await Promise.all([this.updateTokenPrices(), this.updateGasCosts()]);
+    await Promise.all([this.updateTokenPrices(), this.updateGasCosts(), this.loadIntentHistory()]);
   }
 
   protected async updateTokenPrices(): Promise<void> {

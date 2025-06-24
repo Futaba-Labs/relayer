@@ -20,16 +20,16 @@ describe("EnhancedSpokePoolClient", () => {
       level: "debug",
       transports: [new winston.transports.Console({ silent: true })],
     });
-    
+
     chainId = 10; // Optimism
     deploymentBlock = 1000;
-    
+
     mockSpokePool = sinon.createStubInstance(Contract);
     mockSpokePool.provider = {
       getBlockNumber: sinon.stub().resolves(2000),
       getBlock: sinon.stub().resolves({ timestamp: Math.floor(Date.now() / 1000) }),
     } as any;
-    
+
     mockSpokePool.address = "0x1234567890123456789012345678901234567890";
     mockSpokePool.signer = {} as any;
 
@@ -223,7 +223,7 @@ describe("EnhancedSpokePoolClient", () => {
 
       expect(result.success).to.be.true;
       expect(result.searchMethod).to.equal("hybrid");
-      
+
       // Should have deduplicated the events
       const totalEvents = result.events![0].length; // FundsDeposited events
       expect(totalEvents).to.equal(1); // Should be deduplicated to 1 event
