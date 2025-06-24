@@ -133,7 +133,7 @@ export class ProfitClient {
 
   // Dynamic gas calculation properties
   private intentHistory: Intent[] = [];
-  private readonly minOutputAmount = toBNWei("0.01"); // 0.01 ETH minimum
+  private readonly minOutputAmount = toBNWei("0.001"); // 0.001 ETH minimum
   private lastIntentLoad = 0;
   private readonly intentCacheTime = 60 * 1000; // 1 minute cache
 
