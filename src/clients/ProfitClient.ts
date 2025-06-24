@@ -860,6 +860,12 @@ export class ProfitClient {
   // Convert token value to ETH for gas calculations
   private async convertToEth(amount: BigNumber, tokenAddress: string, chainId: number): Promise<BigNumber> {
     try {
+      this.logger.warn({
+        at: "ProfitClient#convertToEth",
+        message: "Getting WETH address",
+        tokenAddress,
+        chainId,
+      });
       const wethAddress = getDeployedAddress("WETH", chainId);
       this.logger.warn({
         at: "ProfitClient#convertToEth",
