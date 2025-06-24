@@ -860,6 +860,13 @@ export class ProfitClient {
   // Convert token value to ETH for gas calculations
   private async convertToEth(amount: BigNumber, tokenAddress: string, chainId: number): Promise<BigNumber> {
     try {
+      const wethAddress = getDeployedAddress("WETH", chainId);
+
+      // If token is WETH, no conversion needed - return amount as is
+      if (tokenAddress.toLowerCase() === wethAddress.toLowerCase()) {
+        return amount;
+      }
+
       const tokenSymbol = this.getTokenSymbol(tokenAddress, chainId);
       const tokenPrice = this.getPriceOfToken(tokenSymbol);
       const ethPrice = this.getPriceOfToken("ETH");
@@ -869,7 +876,7 @@ export class ProfitClient {
       }
 
       const tokenInfo = getTokenInfo(tokenAddress, chainId);
-      const ethInfo = getTokenInfo(getDeployedAddress("WETH", chainId), chainId);
+      const ethInfo = getTokenInfo(wethAddress, chainId);
 
       // Convert: amount * tokenPrice / ethPrice, accounting for decimals
       return amount
