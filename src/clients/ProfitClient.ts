@@ -524,12 +524,23 @@ export class ProfitClient {
     }
 
     try {
-      // Try to calculate optimal gas based on historical data
+      // Fetch actual base fee for the destination chain
+      const actualBaseFee = await this.fetchBaseFee(deposit.destinationChainId);
+
+      this.logger.debug({
+        at: "ProfitClient#getFillProfitabilityWithOptimalGas",
+        message: "Fetched base fee for optimal gas calculation",
+        chainId: deposit.destinationChainId,
+        baseFee: formatGwei(actualBaseFee.toString()),
+        estimatedBaseFee: formatGwei(standardResult.gasPrice.sub(standardResult.gasPrice.div(3)).toString()),
+      });
+
+      // Try to calculate optimal gas based on historical data with actual base fee
       const optimalGasResult = await this.calculateOptimalGas(
         deposit,
-        standardResult.gasPrice.sub(standardResult.gasPrice.div(3)), // Estimate base fee as ~67% of total gas price
+        actualBaseFee,
         standardResult.nativeGasCost,
-        standardResult.grossRelayerFeeUsd
+        deposit.inputAmount.sub(deposit.outputAmount)
       );
 
       if (optimalGasResult && optimalGasResult.isOptimal) {
@@ -855,6 +866,92 @@ export class ProfitClient {
     // In practice, this method might need to be called from Relayer or passed as parameter
     const currentTime = getCurrentTime();
     return deposit.exclusivityDeadline >= currentTime;
+  }
+
+  // Get provider for a specific chain using existing relayer fee queries
+  private getProviderForChain(chainId: number): Provider | null {
+    const query = this.relayerFeeQueries[chainId];
+    if (!query || !("provider" in query)) {
+      return null;
+    }
+    return query.provider as Provider;
+  }
+
+  // Fetch base fee for a specific chain using ethers.js
+  private async fetchBaseFee(chainId: number): Promise<BigNumber> {
+    try {
+      // Try Blocknative API first for latest base fee
+      const response = await fetch(
+        `https://api.blocknative.com/gasprices/blockprices?chainid=${chainId}`
+      );
+
+      if (!response.ok) {
+        throw new Error(`Blocknative API request failed: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const baseFeeGwei = data.blockPrices[0]?.baseFeePerGas;
+
+      if (!baseFeeGwei) {
+        throw new Error("Base fee not found in Blocknative response");
+      }
+
+      // Convert Gwei to wei
+      const baseFeeWei = toBNWei(baseFeeGwei.toString(), 9);
+
+      this.logger.debug({
+        at: "ProfitClient#fetchBaseFee",
+        message: "Successfully fetched base fee from Blocknative API",
+        chainId,
+        baseFeeGwei: baseFeeGwei.toString(),
+        baseFee: formatGwei(baseFeeWei.toString()),
+      });
+
+      return baseFeeWei;
+    } catch (apiError) {
+      this.logger.debug({
+        at: "ProfitClient#fetchBaseFee",
+        message: "Blocknative API failed, trying provider for latest block",
+        chainId,
+        error: apiError instanceof Error ? apiError.message : String(apiError),
+      });
+      const provider = this.getProviderForChain(chainId);
+      // Fallback to provider for latest block when API fails
+      if (provider && chainIsEvm(chainId)) {
+        try {
+          const block = await provider.getBlock("latest");
+          if (block?.baseFeePerGas) {
+            this.logger.debug({
+              at: "ProfitClient#fetchBaseFee",
+              message: "Successfully fetched base fee from provider (latest block after API failure)",
+              chainId,
+              baseFee: formatGwei(block.baseFeePerGas.toString()),
+            });
+            return block.baseFeePerGas;
+          }
+        } catch (providerError) {
+          this.logger.warn({
+            at: "ProfitClient#fetchBaseFee",
+            message: "Both API and provider failed, using fallback value",
+            chainId,
+            apiError: apiError instanceof Error ? apiError.message : String(apiError),
+            providerError: providerError instanceof Error ? providerError.message : String(providerError),
+          });
+        }
+      }
+
+      // Final fallback to a reasonable estimate based on chain
+      const fallbackBaseFee = chainId === CHAIN_IDs.MAINNET ? toBNWei("20", 9) : toBNWei("0.001", 9); // 20 Gwei for mainnet, 0.001 Gwei for L2s
+
+      this.logger.warn({
+        at: "ProfitClient#fetchBaseFee",
+        message: "Using fallback base fee estimate",
+        chainId,
+        fallbackBaseFee: formatGwei(fallbackBaseFee.toString()),
+      });
+
+      return fallbackBaseFee;
+    }
   }
 
   // Convert token value to ETH for gas calculations
