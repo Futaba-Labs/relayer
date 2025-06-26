@@ -478,7 +478,16 @@ export class InventoryClient {
 
     const forceOriginRepayment = depositForcesOriginChainRepayment(deposit, this.hubPoolClient);
     if (!this.isInventoryManagementEnabled()) {
-      return [!this.canTakeDestinationChainRepayment(deposit) ? originChainId : destinationChainId];
+      const result = [!this.canTakeDestinationChainRepayment(deposit) ? originChainId : destinationChainId];
+      this.logger.warn({
+        at: "InventoryClient#determineRefundChainId",
+        message: "Inventory management is disabled, returning single chain",
+        result,
+        originChainId,
+        destinationChainId,
+        tokenConfig: Object.keys(this.inventoryConfig?.tokenConfig || {}),
+      });
+      return result;
     }
 
     // The InventoryClient assumes 1:1 equivalency between input and output tokens. At the moment there is no support
@@ -550,12 +559,28 @@ export class InventoryClient {
     // hub chain repayment if they are under allocated. We don't include hub chain
     // since its the fallback chain if both destination and origin chain are over allocated.
     // Origin chain is now preferred to reduce cross-chain complexity and improve capital efficiency.
+    const originChainEnabled = this._l1TokenEnabledForChain(l1Token, Number(originChainId));
+    this.logger.debug({
+      at: "InventoryClient#determineRefundChainId",
+      message: "Origin chain evaluation",
+      originChainId,
+      hubChainId,
+      originChainEnabled,
+      alreadyInList: chainsToEvaluate.includes(originChainId),
+      l1Token,
+    });
+    
     if (
       !chainsToEvaluate.includes(originChainId) &&
       originChainId !== hubChainId &&
-      this._l1TokenEnabledForChain(l1Token, Number(originChainId))
+      originChainEnabled
     ) {
       chainsToEvaluate.push(originChainId);
+      this.logger.debug({
+        at: "InventoryClient#determineRefundChainId", 
+        message: "Added origin chain to evaluation list",
+        originChainId,
+      });
     }
     if (
       this.canTakeDestinationChainRepayment(deposit) &&
