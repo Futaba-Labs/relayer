@@ -755,8 +755,8 @@ export class ProfitClient {
 
   // Multi-stage filtering algorithm
   private filterRelevantIntents(deposit: Deposit, baseFee: BigNumber): Intent[] {
-    const { originChainId, destinationChainId, outputAmount, outputToken } = deposit;
-    const tokenSymbol = this.getTokenSymbol(outputToken, destinationChainId);
+    const { originChainId, destinationChainId, outputAmount, inputToken } = deposit;
+    const tokenSymbol = this.getTokenSymbol(inputToken, originChainId);
     const targetAmount = Number(outputAmount.toString());
     const targetBaseFee = Number(baseFee.toString());
 

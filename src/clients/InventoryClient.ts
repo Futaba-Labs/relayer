@@ -545,24 +545,24 @@ export class InventoryClient {
     ) {
       chainsToEvaluate.push(originChainId);
     }
-    // Add destination and origin chain if they are not already added.
-    // Prioritize destination chain repayment over origin chain repayment but prefer both over
+    // Add origin and destination chain if they are not already added.
+    // Prioritize origin chain repayment over destination chain repayment but prefer both over
     // hub chain repayment if they are under allocated. We don't include hub chain
     // since its the fallback chain if both destination and origin chain are over allocated.
-    // If destination chain is hub chain, we still want to evaluate it before the origin chain.
-    if (
-      this.canTakeDestinationChainRepayment(deposit) &&
-      !chainsToEvaluate.includes(destinationChainId) &&
-      this._l1TokenEnabledForChain(l1Token, Number(destinationChainId))
-    ) {
-      chainsToEvaluate.push(destinationChainId);
-    }
+    // Origin chain is now preferred to reduce cross-chain complexity and improve capital efficiency.
     if (
       !chainsToEvaluate.includes(originChainId) &&
       originChainId !== hubChainId &&
       this._l1TokenEnabledForChain(l1Token, Number(originChainId))
     ) {
       chainsToEvaluate.push(originChainId);
+    }
+    if (
+      this.canTakeDestinationChainRepayment(deposit) &&
+      !chainsToEvaluate.includes(destinationChainId) &&
+      this._l1TokenEnabledForChain(l1Token, Number(destinationChainId))
+    ) {
+      chainsToEvaluate.push(destinationChainId);
     }
 
     // Sanity check that the possible chains used to pre-compute LP fees by the relayer are a subset of the
