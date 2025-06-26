@@ -1291,6 +1291,11 @@ export class Relayer {
 
     const mark = this.profiler.start("resolveRepaymentChain");
     const preferredChainIds = await inventoryClient.determineRefundChainId(deposit, hubPoolToken);
+    this.logger.debug({
+      at: "Relayer::resolveRepaymentChain",
+      message: "Preferred chains",
+      preferredChainIds,
+    });
     if (preferredChainIds.length === 0) {
       // @dev If the origin chain is a lite chain and there are no preferred repayment chains, then we can assume
       // that the origin chain, the only possible repayment chain, is over-allocated. We should log this case because
