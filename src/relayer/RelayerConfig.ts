@@ -96,6 +96,10 @@ export class RelayerConfig extends CommonConfig {
   // Per-chain backward search configuration
   readonly backwardSearchConfigPerChain: { [chainId: number]: ChainBackwardSearchConfig } = {};
 
+  // Force origin chain repayment configuration
+  readonly forceOriginChainRepayment: boolean;
+  readonly forceOriginChainRepaymentPerChain: { [chainId: number]: boolean } = {};
+
   // Store environment for per-chain configuration loading
   private readonly env: ProcessEnv;
 
@@ -135,6 +139,7 @@ export class RelayerConfig extends CommonConfig {
       RELAYER_BACKWARD_SEARCH_CACHE_ENABLED,
       RELAYER_BACKWARD_SEARCH_MAX_TIME_MS,
       RELAYER_USE_HYBRID_SEARCH,
+      RELAYER_FORCE_ORIGIN_CHAIN_REPAYMENT,
     } = env;
 
     // External listeners are dependent on looping mode being configured.
@@ -398,6 +403,9 @@ export class RelayerConfig extends CommonConfig {
     );
     assert(this.backwardSearchGrowthFactor >= 1.0, "backwardSearchGrowthFactor must be >= 1.0");
     assert(this.backwardSearchMaxTimeMs > 0, "backwardSearchMaxTimeMs must be greater than 0");
+
+    // Initialize force origin chain repayment configuration
+    this.forceOriginChainRepayment = RELAYER_FORCE_ORIGIN_CHAIN_REPAYMENT === "true";
   }
 
   /**
@@ -518,6 +526,38 @@ export class RelayerConfig extends CommonConfig {
   }
 
   /**
+   * @notice Load per-chain force origin repayment configuration from environment variables
+   * @param chainIds Array of chain IDs to configure
+   * @param logger Logger instance for debugging
+   */
+  private loadPerChainForceOriginRepaymentConfig(chainIds: number[], logger: winston.Logger): void {
+    chainIds.forEach((chainId) => {
+      const chainSpecificEnv = this.env[`RELAYER_FORCE_ORIGIN_CHAIN_REPAYMENT_${chainId}`];
+      if (chainSpecificEnv !== undefined) {
+        this.forceOriginChainRepaymentPerChain[chainId] = chainSpecificEnv === "true";
+        
+        logger.debug({
+          at: "RelayerConfig::loadPerChainForceOriginRepaymentConfig",
+          message: `Force origin chain repayment for chain ${chainId}`,
+          chainId,
+          forced: this.forceOriginChainRepaymentPerChain[chainId],
+        });
+      }
+    });
+  }
+
+  /**
+   * @notice Check if origin chain repayment should be forced for a specific chain
+   * @param chainId Chain ID to check
+   * @returns True if origin chain repayment should be forced
+   */
+  shouldForceOriginChainRepayment(chainId: number): boolean {
+    // Check chain-specific setting first, then fall back to global setting
+    const chainSpecific = this.forceOriginChainRepaymentPerChain[chainId];
+    return chainSpecific !== undefined ? chainSpecific : this.forceOriginChainRepayment;
+  }
+
+  /**
    * @notice Loads additional configuration state that can only be known after we know all chains that we're going to
    * support. Warns or throws if any of the configurations are not valid.
    * @param chainIdIndices All expected chain ID's that could be supported by this config.
@@ -551,6 +591,9 @@ export class RelayerConfig extends CommonConfig {
 
     // Load per-chain backward search configuration
     this.loadPerChainBackwardSearchConfig(relayerChainIds, logger);
+
+    // Load per-chain force origin repayment configuration
+    this.loadPerChainForceOriginRepaymentConfig(chainIds, logger);
 
     // Only validate config for chains that the relayer cares about.
     super.validate(relayerChainIds, logger);

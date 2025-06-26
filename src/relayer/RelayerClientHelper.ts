@@ -216,7 +216,12 @@ export async function constructRelayerClients(
     bundleDataClient,
     adapterManager,
     crossChainTransferClient,
-    !config.sendingTransactionsEnabled
+    !config.sendingTransactionsEnabled,
+    true, // prioritizeLpUtilization (default value)
+    {
+      global: config.forceOriginChainRepayment,
+      perChain: config.forceOriginChainRepaymentPerChain,
+    }
   );
 
   const tryMulticallClient = new TryMulticallClient(logger, multiCallerClient.chunkSize, multiCallerClient.baseSigner);

@@ -63,6 +63,10 @@ export class InventoryClient {
   private bundleRefundsPromise: Promise<CombinedRefunds[]> = undefined;
   private excessRunningBalancePromises: { [l1Token: string]: Promise<{ [chainId: number]: BigNumber }> } = {};
   private profiler: InstanceType<typeof Profiler>;
+  private readonly forceOriginChainRepaymentConfig: { 
+    global: boolean;
+    perChain: { [chainId: number]: boolean };
+  };
 
   constructor(
     readonly relayer: string,
@@ -75,10 +79,15 @@ export class InventoryClient {
     readonly adapterManager: AdapterManager,
     readonly crossChainTransferClient: CrossChainTransferClient,
     readonly simMode = false,
-    readonly prioritizeLpUtilization = true
+    readonly prioritizeLpUtilization = true,
+    forceOriginChainRepaymentConfig: { 
+      global: boolean;
+      perChain: { [chainId: number]: boolean };
+    } = { global: false, perChain: {} }
   ) {
     this.scalar = sdkUtils.fixedPointAdjustment;
     this.formatWei = createFormatFunction(2, 4, false, 18);
+    this.forceOriginChainRepaymentConfig = forceOriginChainRepaymentConfig;
     this.profiler = new Profiler({
       logger: this.logger,
       at: "InventoryClient",
@@ -468,6 +477,17 @@ export class InventoryClient {
    * @returns list of chain IDs that are possible repayment chains for the deposit, sorted from highest
    * to lowest priority.
    */
+  /**
+   * Check if origin chain repayment should be forced based on configuration
+   * @param originChainId Origin chain ID to check
+   * @returns true if origin chain repayment should be forced
+   */
+  private shouldForceOriginChainRepayment(originChainId: number): boolean {
+    // Check chain-specific setting first, then fall back to global setting
+    const chainSpecific = this.forceOriginChainRepaymentConfig.perChain[originChainId];
+    return chainSpecific !== undefined ? chainSpecific : this.forceOriginChainRepaymentConfig.global;
+  }
+
   async determineRefundChainId(deposit: Deposit, l1Token?: string): Promise<number[]> {
     const { originChainId, destinationChainId, inputToken, outputToken, inputAmount } = deposit;
     const hubChainId = this.hubPoolClient.chainId;
@@ -477,6 +497,31 @@ export class InventoryClient {
     }
 
     const forceOriginRepayment = depositForcesOriginChainRepayment(deposit, this.hubPoolClient);
+    
+    // Check if origin chain repayment is forced by configuration
+    const forceOriginRepaymentByConfig = this.shouldForceOriginChainRepayment(originChainId);
+    if (forceOriginRepaymentByConfig) {
+      this.logger.debug({
+        at: "InventoryClient#determineRefundChainId",
+        message: "Origin chain repayment forced by configuration",
+        originChainId,
+        depositId: deposit.depositId.toString(),
+      });
+      
+      // Ensure origin chain is enabled for this token
+      if (this._l1TokenEnabledForChain(l1Token || this.getL1TokenAddress(inputToken, originChainId), originChainId)) {
+        return [originChainId];
+      } else {
+        this.logger.warn({
+          at: "InventoryClient#determineRefundChainId",
+          message: "Origin chain repayment forced but token not enabled for origin chain",
+          originChainId,
+          l1Token: l1Token || this.getL1TokenAddress(inputToken, originChainId),
+          depositId: deposit.depositId.toString(),
+        });
+        return [];
+      }
+    }
     if (!this.isInventoryManagementEnabled()) {
       const result = [!this.canTakeDestinationChainRepayment(deposit) ? originChainId : destinationChainId];
       this.logger.warn({
@@ -524,63 +569,54 @@ export class InventoryClient {
 
     // Build list of chains we want to evaluate for repayment:
     const chainsToEvaluate: number[] = [];
-    // Add optimistic rollups to front of evaluation list because these are chains with long withdrawal periods
-    // that we want to prioritize taking repayment on if the chain is going to end up sending funds back to the
-    // hub in the next root bundle over the slow canonical bridge.
-    // We need to calculate the latest running balance for each optimistic rollup chain.
-    // We'll add the last proposed running balance plus new deposits and refunds.
+    
+    // FIRST PRIORITY: Add origin chain as the default preferred repayment chain
+    // This reduces cross-chain complexity and improves capital efficiency by keeping
+    // repayments on the same chain where the deposit originated.
+    const originChainEnabled = this._l1TokenEnabledForChain(l1Token, Number(originChainId));
+    this.logger.debug({
+      at: "InventoryClient#determineRefundChainId",
+      message: "Origin chain evaluation (priority 1)",
+      originChainId,
+      hubChainId,
+      originChainEnabled,
+      l1Token,
+    });
+    
+    if (originChainId !== hubChainId && originChainEnabled) {
+      chainsToEvaluate.push(originChainId);
+      this.logger.debug({
+        at: "InventoryClient#determineRefundChainId", 
+        message: "Added origin chain as first priority repayment chain",
+        originChainId,
+      });
+    }
+    
+    // SECOND PRIORITY: Add optimistic rollups with excess running balances
+    // These are chains with long withdrawal periods that we want to prioritize taking repayment on
+    // if the chain is going to end up sending funds back to the hub in the next root bundle.
     if (!forceOriginRepayment && this.prioritizeLpUtilization) {
       const excessRunningBalancePcts = await this.getExcessRunningBalancePcts(
         l1Token,
         inputAmountInL1TokenDecimals,
         this.getSlowWithdrawalRepaymentChains(l1Token)
       );
-      // Sort chains by highest excess percentage over the spoke target, so we can prioritize
-      // taking repayment on chains with the most excess balance.
+      // Sort chains by highest excess percentage over the spoke target
       const chainsWithExcessSpokeBalances = Object.entries(excessRunningBalancePcts)
         .filter(([, pct]) => pct.gt(0))
         .sort(([, pctx], [, pcty]) => bnComparatorDescending(pctx, pcty))
-        .map(([chainId]) => Number(chainId));
+        .map(([chainId]) => Number(chainId))
+        .filter((chainId) => !chainsToEvaluate.includes(chainId)); // Avoid duplicates
       chainsToEvaluate.push(...chainsWithExcessSpokeBalances);
     }
-    // Add origin chain to take higher priority than destination chain if the destination chain
-    // is a lite chain, which should allow the relayer to take more repayments away from the lite chain. Because
-    // lite chain deposits force repayment on origin, we end up taking lots of repayment on the lite chain so
-    // we should take repayment away from the lite chain where possible.
+    
+    // THIRD PRIORITY: Add origin chain for lite chain destinations if not already added
     if (
       deposit.toLiteChain &&
       !chainsToEvaluate.includes(originChainId) &&
-      this._l1TokenEnabledForChain(l1Token, Number(originChainId))
-    ) {
-      chainsToEvaluate.push(originChainId);
-    }
-    // Add origin and destination chain if they are not already added.
-    // Prioritize origin chain repayment over destination chain repayment but prefer both over
-    // hub chain repayment if they are under allocated. We don't include hub chain
-    // since its the fallback chain if both destination and origin chain are over allocated.
-    // Origin chain is now preferred to reduce cross-chain complexity and improve capital efficiency.
-    const originChainEnabled = this._l1TokenEnabledForChain(l1Token, Number(originChainId));
-    this.logger.debug({
-      at: "InventoryClient#determineRefundChainId",
-      message: "Origin chain evaluation",
-      originChainId,
-      hubChainId,
-      originChainEnabled,
-      alreadyInList: chainsToEvaluate.includes(originChainId),
-      l1Token,
-    });
-    
-    if (
-      !chainsToEvaluate.includes(originChainId) &&
-      originChainId !== hubChainId &&
       originChainEnabled
     ) {
       chainsToEvaluate.push(originChainId);
-      this.logger.debug({
-        at: "InventoryClient#determineRefundChainId", 
-        message: "Added origin chain to evaluation list",
-        originChainId,
-      });
     }
     if (
       this.canTakeDestinationChainRepayment(deposit) &&

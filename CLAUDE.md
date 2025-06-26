@@ -238,6 +238,32 @@ Bridge adapters (`src/adapter/`) handle chain-specific bridging logic:
 - **l2Bridges/** - L2→L1 bridge implementations
 - **AdapterManager** - Orchestrates cross-chain transfers
 
+## Environment Variables
+
+### Force Origin Chain Repayment
+The relayer supports configuration flags to force repayment on the origin chain, overriding the normal inventory management logic:
+
+- `RELAYER_FORCE_ORIGIN_CHAIN_REPAYMENT=true` - Forces repayment on origin chain for all deposits (global setting)
+- `RELAYER_FORCE_ORIGIN_CHAIN_REPAYMENT_{chainId}=true` - Forces repayment on origin chain for deposits from specific chain (chain-specific setting)
+
+**Examples:**
+```bash
+# Force all deposits to use origin chain repayment
+RELAYER_FORCE_ORIGIN_CHAIN_REPAYMENT=true
+
+# Force only Polygon deposits to use origin chain repayment
+RELAYER_FORCE_ORIGIN_CHAIN_REPAYMENT_137=true
+
+# Force only Arbitrum deposits to use origin chain repayment  
+RELAYER_FORCE_ORIGIN_CHAIN_REPAYMENT_42161=true
+```
+
+**Behavior:**
+- Chain-specific settings take precedence over global settings
+- The relayer validates that the origin chain is enabled for the token before forcing repayment
+- If the origin chain is not enabled for the token, the deposit will be skipped with a warning
+- Comprehensive logging is provided for debugging and monitoring when origin chain repayment is forced
+
 ### Prerequisites
 - Redis server required (`redis-server` + `REDIS_URL=redis://localhost:6379`)
 - Node.js >=20.18.0

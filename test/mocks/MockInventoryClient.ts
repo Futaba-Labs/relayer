@@ -23,7 +23,11 @@ export class MockInventoryClient extends InventoryClient {
     adapterManager: AdapterManager | null = null,
     crossChainTransferClient: CrossChainTransferClient | null = null,
     simMode = false,
-    prioritizeLpUtilization = false
+    prioritizeLpUtilization = false,
+    forceOriginChainRepaymentConfig: { 
+      global: boolean;
+      perChain: { [chainId: number]: boolean };
+    } = { global: false, perChain: {} }
   ) {
     super(
       relayer, // relayer
@@ -36,7 +40,8 @@ export class MockInventoryClient extends InventoryClient {
       adapterManager, // adapter manager
       crossChainTransferClient,
       simMode, // sim mode
-      prioritizeLpUtilization // prioritize lp utilization
+      prioritizeLpUtilization, // prioritize lp utilization
+      forceOriginChainRepaymentConfig // force origin chain repayment config
     );
   }
 
