@@ -565,6 +565,12 @@ export class InventoryClient {
       chainsToEvaluate.push(destinationChainId);
     }
 
+    this.logger.info({
+      at: "InventoryClient#determineRefundChainId",
+      message: "Chains to evaluate",
+      chainsToEvaluate,
+    });
+
     // Sanity check that the possible chains used to pre-compute LP fees by the relayer are a subset of the
     // chains that are actually eligible for repayment.
     const possibleRepaymentChainIds = this.getPossibleRepaymentChainIds(deposit);

@@ -756,7 +756,13 @@ export class ProfitClient {
   // Multi-stage filtering algorithm
   private filterRelevantIntents(deposit: Deposit, baseFee: BigNumber): Intent[] {
     const { originChainId, destinationChainId, outputAmount, inputToken } = deposit;
-    const tokenSymbol = this.getTokenSymbol(inputToken, originChainId);
+    let tokenSymbol = this.getTokenSymbol(inputToken, originChainId);
+    
+    // Convert ETH to WETH for consistency with intent data
+    if (tokenSymbol === "ETH") {
+      tokenSymbol = "WETH";
+    }
+    
     const targetAmount = Number(outputAmount.toString());
     const targetBaseFee = Number(baseFee.toString());
 
