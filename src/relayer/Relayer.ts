@@ -309,6 +309,9 @@ export class Relayer {
     // Unwrap WETH after filling deposits, but before rebalancing.
     await inventoryClient.unwrapWeth();
 
+    // Clean up stale pending transaction receipts
+    await this.cleanupStalePendingTxnReceipts();
+
     // Flush any stale state (i.e. deposit/fill events that are outside of the configured lookback window?)
     this.ignoredDeposits = {};
 
@@ -1707,6 +1710,65 @@ export class Relayer {
       )} Gwei.`;
 
     return msg;
+  }
+
+  /**
+   * @description Clean up stale pending transaction receipts by checking their status
+   * This prevents memory leaks from accumulating completed/failed transactions
+   */
+  private async cleanupStalePendingTxnReceipts(): Promise<void> {
+    const chainIds = Object.keys(this.pendingTxnReceipts).map(Number);
+    let totalCleaned = 0;
+
+    for (const chainId of chainIds) {
+      const pendingPromise = this.pendingTxnReceipts[chainId];
+      if (!isDefined(pendingPromise)) {
+        continue;
+      }
+
+      try {
+        // Check if the promise has resolved by using Promise.race with a timeout
+        const timeoutPromise = new Promise<"timeout">((resolve) => 
+          setTimeout(() => resolve("timeout"), 100)
+        );
+        
+        const result = await Promise.race([
+          pendingPromise.then(() => "resolved" as const),
+          timeoutPromise
+        ]);
+
+        if (result === "resolved") {
+          // Promise has resolved, we can safely remove it
+          delete this.pendingTxnReceipts[chainId];
+          totalCleaned++;
+          this.logger.debug({
+            at: "Relayer::cleanupStalePendingTxnReceipts",
+            message: `Cleaned up resolved pending transaction receipt for chain ${chainId}`,
+            chainId,
+          });
+        }
+        // If result === "timeout", the promise is still pending, so we leave it alone
+      } catch (error) {
+        // Promise rejected, remove it as well
+        delete this.pendingTxnReceipts[chainId];
+        totalCleaned++;
+        this.logger.debug({
+          at: "Relayer::cleanupStalePendingTxnReceipts",
+          message: `Cleaned up rejected pending transaction receipt for chain ${chainId}`,
+          chainId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (totalCleaned > 0) {
+      this.logger.debug({
+        at: "Relayer::cleanupStalePendingTxnReceipts",
+        message: `Cleaned up ${totalCleaned} stale pending transaction receipts`,
+        totalCleaned,
+        remainingPendingChains: Object.keys(this.pendingTxnReceipts).length,
+      });
+    }
   }
 
   private getMulticaller(chainId: number): MultiCallerClient {
