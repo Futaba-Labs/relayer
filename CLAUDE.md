@@ -210,7 +210,7 @@ try {
 
 #### Wallet-Based Authentication
 - **CLI Wallet Selection**: `--wallet` parameter determines signer type
-- **Supported Types**: `mnemonic`, `private-key`, `gckms`, `aws`
+- **Supported Types**: `mnemonic`, `private-key`, `gckms`, `aws-kms`, `void`
 - **Signer Construction**: `retrieveSignerFromCLIArgs()` creates ethers Signer
 
 #### Multi-Chain Signer Management
@@ -221,10 +221,11 @@ const chainSigner = baseSigner.connect(await getProvider(chainId));
 ```
 
 #### Security Patterns
-- **No Key Storage**: Private keys never stored in memory long-term
+- **No Key Storage**: Private keys never stored in memory long-term (except aws-kms which uses KMS directly)
 - **Environment Variables**: Sensitive data via ENV vars, not hardcoded
 - **Provider Separation**: Each chain gets isolated provider connection
 - **Transaction Signing**: All transactions signed locally, never sent unsigned
+- **AWS KMS Integration**: Support for hardware security modules via AWS KMS direct signing
 
 #### Transaction Authorization
 - **Approval Management**: Automated token approvals for bridge contracts
@@ -263,6 +264,64 @@ RELAYER_FORCE_ORIGIN_CHAIN_REPAYMENT_42161=true
 - The relayer validates that the origin chain is enabled for the token before forcing repayment
 - If the origin chain is not enabled for the token, the deposit will be skipped with a warning
 - Comprehensive logging is provided for debugging and monitoring when origin chain repayment is forced
+
+## AWS KMS Configuration
+
+The relayer supports AWS KMS for secure transaction signing without exposing private keys in memory.
+
+### Environment Variables
+
+```bash
+# AWS KMS wallet configuration
+AWS_KMS_KEY_ID=arn:aws:kms:us-east-1:123456789012:key/abcd-1234-efgh-5678
+AWS_KMS_REGION=us-east-1
+AWS_PROFILE=default  # Optional: AWS CLI profile to use
+
+# Usage
+node ./dist/index.js --relayer --wallet aws-kms
+```
+
+### AWS IAM Configuration
+
+Required IAM permissions for the KMS key:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "kms:Sign",
+        "kms:GetPublicKey",
+        "kms:DescribeKey"
+      ],
+      "Resource": "arn:aws:kms:region:account:key/key-id"
+    }
+  ]
+}
+```
+
+### Key Requirements
+
+- **Key Type**: ECC_SECG_P256K1 (secp256k1 - Ethereum compatible)
+- **Key Usage**: SIGN_VERIFY
+- **Key Origin**: AWS_KMS or AWS_CLOUDHSM (for HSM-backed keys)
+
+### Authentication Options
+
+1. **IAM Role** (Recommended for production): Attach IAM role to EC2/ECS/Lambda
+2. **AWS Profile**: Use AWS CLI profiles for local development
+3. **Environment Variables**: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+4. **Instance Profile**: For EC2 instances with attached IAM roles
+
+### Security Benefits
+
+- **Hardware Security**: Private keys stored in AWS HSMs
+- **Audit Trail**: All signing operations logged in CloudTrail
+- **Access Control**: Fine-grained IAM permissions
+- **Key Rotation**: AWS-managed key rotation support
+- **No Key Exposure**: Private keys never leave AWS infrastructure
 
 ### Prerequisites
 - Redis server required (`redis-server` + `REDIS_URL=redis://localhost:6379`)

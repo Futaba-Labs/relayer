@@ -3,6 +3,7 @@ import { constants as ethersConsts, VoidSigner } from "ethers";
 import { typeguards } from "@across-protocol/sdk";
 import { Signer, Wallet, retrieveGckmsKeys, getGckmsConfig, isDefined, assert } from "./";
 import { ArweaveWalletJWKInterface, ArweaveWalletJWKInterfaceSS } from "../interfaces";
+import { createAWSKmsSigner, validateAWSKmsConfig } from "./AWSKmsUtils";
 
 /**
  * Signer options for the getSigner function.
@@ -27,6 +28,14 @@ export type SignerOptions = {
    * For a void signer, the address to use.
    */
   roAddress?: string;
+  /**
+   * AWS KMS configuration for aws-kms keyType.
+   */
+  awsKmsConfig?: {
+    keyId: string;
+    region: string;
+    profile?: string;
+  };
 };
 
 /**
@@ -37,7 +46,7 @@ export type SignerOptions = {
  * @note If cleanEnv is true, the mnemonic and private key will be cleared from the env after retrieving the signer.
  * @note This function will throw if called a second time after the first call with cleanEnv = true.
  */
-export async function getSigner({ keyType, gckmsKeys, cleanEnv, roAddress }: SignerOptions): Promise<Signer> {
+export async function getSigner({ keyType, gckmsKeys, cleanEnv, roAddress, awsKmsConfig }: SignerOptions): Promise<Signer> {
   let signer: Signer | undefined = undefined;
   switch (keyType) {
     case "mnemonic":
@@ -52,6 +61,9 @@ export async function getSigner({ keyType, gckmsKeys, cleanEnv, roAddress }: Sig
     case "secret":
       signer = await getSecretSigner();
       break;
+    case "aws-kms":
+      signer = await getAWSKmsSigner(awsKmsConfig);
+      break;
     case "void":
       signer = new VoidSigner(roAddress ?? ethersConsts.AddressZero);
       break;
@@ -59,7 +71,7 @@ export async function getSigner({ keyType, gckmsKeys, cleanEnv, roAddress }: Sig
       throw new Error(`getSigner: Unsupported signer key type (${keyType})`);
   }
   if (!signer) {
-    throw new Error('Must specify "secret", "mnemonic", "privateKey", "gckms" or "void" for keyType');
+    throw new Error('Must specify "secret", "mnemonic", "privateKey", "gckms", "aws-kms" or "void" for keyType');
   }
   if (cleanEnv) {
     cleanKeysFromEnvironment();
@@ -122,6 +134,22 @@ async function getSecretSigner(): Promise<Signer> {
   }
 }
 
+/**
+ * Retrieves an AWS KMS signer based on the configuration.
+ * @param awsKmsConfig AWS KMS configuration or undefined to use environment variables.
+ * @returns An AWS KMS signer.
+ * @throws If the AWS KMS configuration is invalid or missing.
+ */
+async function getAWSKmsSigner(awsKmsConfig?: SignerOptions["awsKmsConfig"]): Promise<Signer> {
+  const keyId = awsKmsConfig?.keyId || process.env.AWS_KMS_KEY_ID;
+  const region = awsKmsConfig?.region || process.env.AWS_KMS_REGION || "us-east-1";
+  const profile = awsKmsConfig?.profile || process.env.AWS_PROFILE;
+
+  validateAWSKmsConfig(keyId, region);
+
+  return createAWSKmsSigner(keyId!, region, profile);
+}
+
 export function getArweaveJWKSigner({ keyType, cleanEnv }: SignerOptions): ArweaveWalletJWKInterface {
   // If the keytype is readonly, we should generate a read-only key
   // on the fly and return it.
@@ -161,7 +189,7 @@ export function getArweaveJWKSigner({ keyType, cleanEnv }: SignerOptions): Arwea
 function cleanKeysFromEnvironment(
   cleanTypes: { arweave: boolean; eth: boolean } = { arweave: false, eth: true }
 ): void {
-  const ethKeys = ["MNEMONIC", "PRIVATE_KEY", "SECRET"];
+  const ethKeys = ["MNEMONIC", "PRIVATE_KEY", "SECRET", "AWS_KMS_KEY_ID", "AWS_KMS_REGION", "AWS_PROFILE"];
   const arweaveKeys = ["ARWEAVE_WALLET_JWK"];
   if (cleanTypes.eth) {
     ethKeys.forEach((key: string) => delete process.env[key]);

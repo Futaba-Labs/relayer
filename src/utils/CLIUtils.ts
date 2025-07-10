@@ -4,7 +4,7 @@ import { constants as sdkConsts } from "@across-protocol/sdk";
 import { SignerOptions, getSigner } from "./SignerUtils";
 import { isDefined } from "./TypeGuards";
 
-const keyTypes = ["secret", "mnemonic", "privateKey", "gckms", "void"];
+const keyTypes = ["secret", "mnemonic", "privateKey", "gckms", "aws-kms", "void"];
 
 /**
  * Retrieves a signer based on both the CLI args and the env.
@@ -34,6 +34,11 @@ export function retrieveSignerFromCLIArgs(): Promise<Signer> {
     gckmsKeys: isDefined(args.keys) ? [args.keys] : [],
     roAddress: args.address,
     cleanEnv: false, // TODO: We don't want to clean the env for now. This will be changed in the future.
+    awsKmsConfig: keyType === "aws-kms" ? {
+      keyId: process.env.AWS_KMS_KEY_ID || "",
+      region: process.env.AWS_KMS_REGION || "us-east-1",
+      profile: process.env.AWS_PROFILE,
+    } : undefined,
   };
 
   // Return the signer.
@@ -45,6 +50,6 @@ export function retrieveSignerFromCLIArgs(): Promise<Signer> {
  * @param keyType The key type to check.
  * @returns True if the key type is valid, false otherwise.
  */
-function isValidKeyType(keyType: string): keyType is "secret" | "mnemonic" | "privateKey" | "gckms" | "void" {
+function isValidKeyType(keyType: string): keyType is "secret" | "mnemonic" | "privateKey" | "gckms" | "aws-kms" | "void" {
   return keyTypes.includes(keyType);
 }
