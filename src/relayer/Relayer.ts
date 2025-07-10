@@ -912,7 +912,7 @@ export class Relayer {
         tokenClient.decrementLocalBalance(destinationChainId, outputToken, outputAmount);
 
         const gasLimit = isMessageEmpty(resolveDepositMessage(deposit)) ? undefined : _gasLimit;
-        
+
         // Pass optimal gas information if available
         const optimalGas = (repaymentChainProfitability as any)?.optimalGas;
         this.fillRelay(deposit, repaymentChainId, realizedLpFeePct, gasPrice, gasLimit, optimalGas);
@@ -1245,7 +1245,7 @@ export class Relayer {
       const contract = spokePoolClient.spokePool;
       const chainId = deposit.destinationChainId;
       const multiCallerClient = this.getMulticaller(chainId);
-      
+
       // Include optimal gas parameters if available
       const txnConfig: any = { contract, chainId, method, args, gasLimit, message, mrkdwn };
       if (optimalGas && optimalGas.isOptimal) {
@@ -1262,7 +1262,7 @@ export class Relayer {
           },
         });
       }
-      
+
       multiCallerClient.enqueueTransaction(txnConfig);
     }
 
@@ -1354,16 +1354,16 @@ export class Relayer {
     }> => {
       // Use optimal gas calculation if enabled via environment variable
       const useOptimalGas = process.env.RELAYER_USE_OPTIMAL_GAS === "true";
-      
+
       if (useOptimalGas) {
         const profitabilityResult = await profitClient.getFillProfitabilityWithOptimalGas(
-          deposit, 
-          lpFeePct, 
-          hubPoolToken, 
-          preferredChainId, 
+          deposit,
+          lpFeePct,
+          hubPoolToken,
+          preferredChainId,
           true // useOptimalGas = true
         );
-        
+
         return {
           profitable: profitabilityResult.profitable,
           gasLimit: profitabilityResult.nativeGasCost,
@@ -1381,7 +1381,7 @@ export class Relayer {
           gasPrice,
           netRelayerFeePct: relayerFeePct, // net relayer fee is equal to total fee minus the lp fee.
         } = await profitClient.isFillProfitable(deposit, lpFeePct, hubPoolToken, preferredChainId);
-        
+
         return {
           profitable,
           gasLimit,
@@ -1405,9 +1405,12 @@ export class Relayer {
     let preferredChain: number | undefined = undefined;
 
     // @dev The following internal function should be the only one used to set `preferredChain` above.
-    const getProfitabilityDataForPreferredChainIndex = (preferredChainIndex: number): RepaymentChainProfitability & { optimalGas?: any } => {
+    const getProfitabilityDataForPreferredChainIndex = (
+      preferredChainIndex: number
+    ): RepaymentChainProfitability & { optimalGas?: any } => {
       const lpFeePct = lpFeePcts[preferredChainIndex];
-      const { gasLimit, gasCost, relayerFeePct, gasPrice, optimalGas } = repaymentChainProfitabilities[preferredChainIndex];
+      const { gasLimit, gasCost, relayerFeePct, gasPrice, optimalGas } =
+        repaymentChainProfitabilities[preferredChainIndex];
       return {
         gasLimit,
         gasCost,
@@ -1728,14 +1731,9 @@ export class Relayer {
 
       try {
         // Check if the promise has resolved by using Promise.race with a timeout
-        const timeoutPromise = new Promise<"timeout">((resolve) => 
-          setTimeout(() => resolve("timeout"), 100)
-        );
-        
-        const result = await Promise.race([
-          pendingPromise.then(() => "resolved" as const),
-          timeoutPromise
-        ]);
+        const timeoutPromise = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 100));
+
+        const result = await Promise.race([pendingPromise.then(() => "resolved" as const), timeoutPromise]);
 
         if (result === "resolved") {
           // Promise has resolved, we can safely remove it

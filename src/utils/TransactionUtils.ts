@@ -88,7 +88,7 @@ export async function runTransaction(
 
   try {
     let gas: any;
-    
+
     // Use optimal gas parameters if available and optimal
     if (optimalGas && optimalGas.isOptimal) {
       logger.debug({
@@ -104,7 +104,7 @@ export async function runTransaction(
           profitBps: optimalGas.profitBps,
         },
       });
-      
+
       // Use optimal gas parameters
       if (LEGACY_TRANSACTION_CHAINS.includes(chainId)) {
         // Legacy chains use gasPrice

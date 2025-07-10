@@ -24,7 +24,7 @@ export class MockInventoryClient extends InventoryClient {
     crossChainTransferClient: CrossChainTransferClient | null = null,
     simMode = false,
     prioritizeLpUtilization = false,
-    forceOriginChainRepaymentConfig: { 
+    forceOriginChainRepaymentConfig: {
       global: boolean;
       perChain: { [chainId: number]: boolean };
     } = { global: false, perChain: {} }

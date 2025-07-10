@@ -63,7 +63,7 @@ export class InventoryClient {
   private bundleRefundsPromise: Promise<CombinedRefunds[]> = undefined;
   private excessRunningBalancePromises: { [l1Token: string]: Promise<{ [chainId: number]: BigNumber }> } = {};
   private profiler: InstanceType<typeof Profiler>;
-  private readonly forceOriginChainRepaymentConfig: { 
+  private readonly forceOriginChainRepaymentConfig: {
     global: boolean;
     perChain: { [chainId: number]: boolean };
   };
@@ -80,7 +80,7 @@ export class InventoryClient {
     readonly crossChainTransferClient: CrossChainTransferClient,
     readonly simMode = false,
     readonly prioritizeLpUtilization = true,
-    forceOriginChainRepaymentConfig: { 
+    forceOriginChainRepaymentConfig: {
       global: boolean;
       perChain: { [chainId: number]: boolean };
     } = { global: false, perChain: {} }
@@ -497,7 +497,7 @@ export class InventoryClient {
     }
 
     const forceOriginRepayment = depositForcesOriginChainRepayment(deposit, this.hubPoolClient);
-    
+
     // Check if origin chain repayment is forced by configuration
     const forceOriginRepaymentByConfig = this.shouldForceOriginChainRepayment(originChainId);
     if (forceOriginRepaymentByConfig) {
@@ -507,7 +507,7 @@ export class InventoryClient {
         originChainId,
         depositId: deposit.depositId.toString(),
       });
-      
+
       // Ensure origin chain is enabled for this token
       if (this._l1TokenEnabledForChain(l1Token || this.getL1TokenAddress(inputToken, originChainId), originChainId)) {
         return [originChainId];
@@ -569,7 +569,7 @@ export class InventoryClient {
 
     // Build list of chains we want to evaluate for repayment:
     const chainsToEvaluate: number[] = [];
-    
+
     // FIRST PRIORITY: Add origin chain as the default preferred repayment chain
     // This reduces cross-chain complexity and improves capital efficiency by keeping
     // repayments on the same chain where the deposit originated.
@@ -582,16 +582,16 @@ export class InventoryClient {
       originChainEnabled,
       l1Token,
     });
-    
+
     if (originChainId !== hubChainId && originChainEnabled) {
       chainsToEvaluate.push(originChainId);
       this.logger.debug({
-        at: "InventoryClient#determineRefundChainId", 
+        at: "InventoryClient#determineRefundChainId",
         message: "Added origin chain as first priority repayment chain",
         originChainId,
       });
     }
-    
+
     // SECOND PRIORITY: Add optimistic rollups with excess running balances
     // These are chains with long withdrawal periods that we want to prioritize taking repayment on
     // if the chain is going to end up sending funds back to the hub in the next root bundle.
@@ -609,13 +609,9 @@ export class InventoryClient {
         .filter((chainId) => !chainsToEvaluate.includes(chainId)); // Avoid duplicates
       chainsToEvaluate.push(...chainsWithExcessSpokeBalances);
     }
-    
+
     // THIRD PRIORITY: Add origin chain for lite chain destinations if not already added
-    if (
-      deposit.toLiteChain &&
-      !chainsToEvaluate.includes(originChainId) &&
-      originChainEnabled
-    ) {
+    if (deposit.toLiteChain && !chainsToEvaluate.includes(originChainId) && originChainEnabled) {
       chainsToEvaluate.push(originChainId);
     }
     if (

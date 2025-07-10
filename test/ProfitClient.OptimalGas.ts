@@ -49,9 +49,9 @@ describe("ProfitClient: Dynamic Gas Calculation", async function () {
     };
 
     spokePoolClient = new MockSpokePoolClient(
-      spyLogger, 
-      mockSpokePool as any, 
-      chainId, 
+      spyLogger,
+      mockSpokePool as any,
+      chainId,
       0 // deployment block
     );
 
@@ -378,9 +378,30 @@ describe("ProfitClient: Dynamic Gas Calculation", async function () {
 
     beforeEach(function () {
       testIntents = [
-        { outputAmount: 1000000000000000000, baseFee: 12000000000, profitBps: 20, srcChainId: 1, dstChainId: 10, tokenSymbol: "ETH" },
-        { outputAmount: 1000000000000000000, baseFee: 12000000000, profitBps: 15, srcChainId: 1, dstChainId: 10, tokenSymbol: "ETH" },
-        { outputAmount: 1000000000000000000, baseFee: 12000000000, profitBps: 25, srcChainId: 1, dstChainId: 10, tokenSymbol: "ETH" },
+        {
+          outputAmount: 1000000000000000000,
+          baseFee: 12000000000,
+          profitBps: 20,
+          srcChainId: 1,
+          dstChainId: 10,
+          tokenSymbol: "ETH",
+        },
+        {
+          outputAmount: 1000000000000000000,
+          baseFee: 12000000000,
+          profitBps: 15,
+          srcChainId: 1,
+          dstChainId: 10,
+          tokenSymbol: "ETH",
+        },
+        {
+          outputAmount: 1000000000000000000,
+          baseFee: 12000000000,
+          profitBps: 25,
+          srcChainId: 1,
+          dstChainId: 10,
+          tokenSymbol: "ETH",
+        },
       ];
     });
 
@@ -425,8 +446,22 @@ describe("ProfitClient: Dynamic Gas Calculation", async function () {
 
     it("Should apply minimum 0.5 BPS floor", async function () {
       const lowProfitIntents = [
-        { outputAmount: 1000000000000000000, baseFee: 12000000000, profitBps: 0.1, srcChainId: 1, dstChainId: 10, tokenSymbol: "ETH" },
-        { outputAmount: 1000000000000000000, baseFee: 12000000000, profitBps: 0.2, srcChainId: 1, dstChainId: 10, tokenSymbol: "ETH" },
+        {
+          outputAmount: 1000000000000000000,
+          baseFee: 12000000000,
+          profitBps: 0.1,
+          srcChainId: 1,
+          dstChainId: 10,
+          tokenSymbol: "ETH",
+        },
+        {
+          outputAmount: 1000000000000000000,
+          baseFee: 12000000000,
+          profitBps: 0.2,
+          srcChainId: 1,
+          dstChainId: 10,
+          tokenSymbol: "ETH",
+        },
       ];
 
       const deposit = {
@@ -446,8 +481,12 @@ describe("ProfitClient: Dynamic Gas Calculation", async function () {
     beforeEach(async function () {
       // Mock price client methods
       sinon.stub(profitClient, "getPriceOfToken").callsFake((symbol) => {
-        if (symbol === "ETH") return toBNWei("2000"); // $2000 per ETH
-        if (symbol === "USDC") return toBNWei("1"); // $1 per USDC
+        if (symbol === "ETH") {
+          return toBNWei("2000");
+        } // $2000 per ETH
+        if (symbol === "USDC") {
+          return toBNWei("1");
+        } // $1 per USDC
         return toBNWei("1");
       });
 
@@ -488,7 +527,14 @@ describe("ProfitClient: Dynamic Gas Calculation", async function () {
       // Mock filtering and token methods
       sinon.stub(profitClient as any, "getTokenSymbol").returns("ETH");
       sinon.stub(profitClient as any, "filterRelevantIntents").returns([
-        { outputAmount: 1000000000000000000, baseFee: 12000000000, profitBps: 15, srcChainId: 1, dstChainId: 10, tokenSymbol: "ETH" },
+        {
+          outputAmount: 1000000000000000000,
+          baseFee: 12000000000,
+          profitBps: 15,
+          srcChainId: 1,
+          dstChainId: 10,
+          tokenSymbol: "ETH",
+        },
       ]);
 
       const baseFee = toBNWei("12", 9); // 12 Gwei
@@ -587,7 +633,14 @@ describe("ProfitClient: Dynamic Gas Calculation", async function () {
 
       sinon.stub(profitClient as any, "getTokenSymbol").returns("ETH");
       sinon.stub(profitClient as any, "filterRelevantIntents").returns([
-        { outputAmount: 1000000000000000000, baseFee: 12000000000, profitBps: 15, srcChainId: 1, dstChainId: 1, tokenSymbol: "ETH" },
+        {
+          outputAmount: 1000000000000000000,
+          baseFee: 12000000000,
+          profitBps: 15,
+          srcChainId: 1,
+          dstChainId: 1,
+          tokenSymbol: "ETH",
+        },
       ]);
 
       const baseFee = toBNWei("50", 9); // High base fee
@@ -606,13 +659,17 @@ describe("ProfitClient: Dynamic Gas Calculation", async function () {
     beforeEach(async function () {
       // Set up comprehensive mocks
       sinon.stub(profitClient, "getPriceOfToken").callsFake((symbol) => {
-        if (symbol === "ETH") return toBNWei("2000");
-        if (symbol === "USDC") return toBNWei("1");
+        if (symbol === "ETH") {
+          return toBNWei("2000");
+        }
+        if (symbol === "USDC") {
+          return toBNWei("1");
+        }
         return toBNWei("1");
       });
 
       sinon.stub(profitClient as any, "getTokenSymbol").returns("ETH");
-      
+
       // Mock hubPoolClient methods
       sinon.stub(hubPoolClient, "getTokenInfoForAddress").returns({
         symbol: "ETH",
@@ -690,7 +747,7 @@ describe("ProfitClient: Dynamic Gas Calculation", async function () {
 
       expect(result.profitable).to.be.true;
       expect(result.optimalGas).to.not.be.undefined;
-      
+
       if (result.optimalGas) {
         expect(result.optimalGas.isOptimal).to.be.true;
         expect(result.optimalGas.profitBps).to.equal(16); // 20 * 0.8 for L2 non-exclusive
@@ -843,7 +900,14 @@ describe("ProfitClient: Dynamic Gas Calculation", async function () {
       sinon.stub(profitClient, "getPriceOfToken").returns(bnZero);
       sinon.stub(profitClient as any, "getTokenSymbol").returns("ETH");
       sinon.stub(profitClient as any, "filterRelevantIntents").returns([
-        { outputAmount: 1000000000000000000, baseFee: 12000000000, profitBps: 15, srcChainId: 1, dstChainId: 10, tokenSymbol: "ETH" },
+        {
+          outputAmount: 1000000000000000000,
+          baseFee: 12000000000,
+          profitBps: 15,
+          srcChainId: 1,
+          dstChainId: 10,
+          tokenSymbol: "ETH",
+        },
       ]);
 
       const baseFee = toBNWei("12", 9);
@@ -878,7 +942,14 @@ describe("ProfitClient: Dynamic Gas Calculation", async function () {
       sinon.stub(profitClient, "getPriceOfToken").returns(toBNWei("2000"));
       sinon.stub(profitClient as any, "getTokenSymbol").returns("ETH");
       sinon.stub(profitClient as any, "filterRelevantIntents").returns([
-        { outputAmount: 1000000000000000000, baseFee: 12000000000, profitBps: 50, srcChainId: 1, dstChainId: 10, tokenSymbol: "ETH" }, // High profit target
+        {
+          outputAmount: 1000000000000000000,
+          baseFee: 12000000000,
+          profitBps: 50,
+          srcChainId: 1,
+          dstChainId: 10,
+          tokenSymbol: "ETH",
+        }, // High profit target
       ]);
 
       const baseFee = toBNWei("12", 9);

@@ -757,12 +757,12 @@ export class ProfitClient {
   private filterRelevantIntents(deposit: Deposit, baseFee: BigNumber): Intent[] {
     const { originChainId, destinationChainId, outputAmount, inputToken } = deposit;
     let tokenSymbol = this.getTokenSymbol(inputToken, originChainId);
-    
+
     // Convert ETH to WETH for consistency with intent data
     if (tokenSymbol === "ETH") {
       tokenSymbol = "WETH";
     }
-    
+
     const targetAmount = Number(outputAmount.toString());
     const targetBaseFee = Number(baseFee.toString());
 
@@ -887,9 +887,7 @@ export class ProfitClient {
   private async fetchBaseFee(chainId: number): Promise<BigNumber> {
     try {
       // Try Blocknative API first for latest base fee
-      const response = await fetch(
-        `https://api.blocknative.com/gasprices/blockprices?chainid=${chainId}`
-      );
+      const response = await fetch(`https://api.blocknative.com/gasprices/blockprices?chainid=${chainId}`);
 
       if (!response.ok) {
         throw new Error(`Blocknative API request failed: ${response.statusText}`);
@@ -964,7 +962,7 @@ export class ProfitClient {
   private async convertToEth(amount: BigNumber, tokenAddress: string, chainId: number): Promise<BigNumber> {
     try {
       const tokenSymbol = this.getTokenSymbol(tokenAddress, chainId);
-      
+
       // If token is WETH or ETH, no conversion needed - return amount as is
       if (tokenSymbol === "WETH" || tokenSymbol === "ETH") {
         return amount;
@@ -978,13 +976,13 @@ export class ProfitClient {
       }
 
       const tokenInfo = getTokenInfo(tokenAddress, chainId);
-      
+
       // Get WETH info for calculations - use mainnet WETH as reference
       const wethMainnetAddress = TOKEN_SYMBOLS_MAP["WETH"]?.addresses[CHAIN_IDs.MAINNET];
       if (!wethMainnetAddress) {
         throw new Error("WETH address not found in TOKEN_SYMBOLS_MAP");
       }
-      
+
       const ethInfo = getTokenInfo(wethMainnetAddress, CHAIN_IDs.MAINNET);
 
       // Convert: amount * tokenPrice / ethPrice, accounting for decimals

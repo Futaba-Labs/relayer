@@ -3,7 +3,7 @@ import { constants as ethersConsts, VoidSigner } from "ethers";
 import { typeguards } from "@across-protocol/sdk";
 import { Signer, Wallet, retrieveGckmsKeys, getGckmsConfig, isDefined, assert } from "./";
 import { ArweaveWalletJWKInterface, ArweaveWalletJWKInterfaceSS } from "../interfaces";
-import { createAWSKmsSigner, validateAWSKmsConfig } from "./AWSKmsUtils";
+import { getAWSKmsSigner, validateAWSKmsConfig } from "./AWSKmsUtils";
 
 /**
  * Signer options for the getSigner function.
@@ -46,7 +46,13 @@ export type SignerOptions = {
  * @note If cleanEnv is true, the mnemonic and private key will be cleared from the env after retrieving the signer.
  * @note This function will throw if called a second time after the first call with cleanEnv = true.
  */
-export async function getSigner({ keyType, gckmsKeys, cleanEnv, roAddress, awsKmsConfig }: SignerOptions): Promise<Signer> {
+export async function getSigner({
+  keyType,
+  gckmsKeys,
+  cleanEnv,
+  roAddress,
+  awsKmsConfig,
+}: SignerOptions): Promise<Signer> {
   let signer: Signer | undefined = undefined;
   switch (keyType) {
     case "mnemonic":
@@ -62,7 +68,7 @@ export async function getSigner({ keyType, gckmsKeys, cleanEnv, roAddress, awsKm
       signer = await getSecretSigner();
       break;
     case "aws-kms":
-      signer = await getAWSKmsSigner(awsKmsConfig);
+      signer = await getAWSKmsSignerFromConfig(awsKmsConfig);
       break;
     case "void":
       signer = new VoidSigner(roAddress ?? ethersConsts.AddressZero);
@@ -140,14 +146,14 @@ async function getSecretSigner(): Promise<Signer> {
  * @returns An AWS KMS signer.
  * @throws If the AWS KMS configuration is invalid or missing.
  */
-async function getAWSKmsSigner(awsKmsConfig?: SignerOptions["awsKmsConfig"]): Promise<Signer> {
+async function getAWSKmsSignerFromConfig(awsKmsConfig?: SignerOptions["awsKmsConfig"]): Promise<Signer> {
   const keyId = awsKmsConfig?.keyId || process.env.AWS_KMS_KEY_ID;
   const region = awsKmsConfig?.region || process.env.AWS_KMS_REGION || "us-east-1";
   const profile = awsKmsConfig?.profile || process.env.AWS_PROFILE;
 
   validateAWSKmsConfig(keyId, region);
 
-  return createAWSKmsSigner(keyId!, region, profile);
+  return getAWSKmsSigner(keyId!, region, profile);
 }
 
 export function getArweaveJWKSigner({ keyType, cleanEnv }: SignerOptions): ArweaveWalletJWKInterface {

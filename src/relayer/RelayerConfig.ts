@@ -535,7 +535,7 @@ export class RelayerConfig extends CommonConfig {
       const chainSpecificEnv = this.env[`RELAYER_FORCE_ORIGIN_CHAIN_REPAYMENT_${chainId}`];
       if (chainSpecificEnv !== undefined) {
         this.forceOriginChainRepaymentPerChain[chainId] = chainSpecificEnv === "true";
-        
+
         logger.debug({
           at: "RelayerConfig::loadPerChainForceOriginRepaymentConfig",
           message: `Force origin chain repayment for chain ${chainId}`,
