@@ -34,8 +34,7 @@ export function getAWSKmsSigner(
 
   const signer = new KmsEthersSigner({
     keyId,
-    kmsClientConfig,
-  }, provider);
+  });
 
   return signer;
 }
