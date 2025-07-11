@@ -20,15 +20,18 @@ import {
   TransactionResponse,
   Profiler,
   formatGwei,
-  toBytes32,
   depositForcesOriginChainRepayment,
   isEVMSpokePoolClient,
   isSVMSpokePoolClient,
+  Address,
+  toAddressType,
+  EvmAddress,
+  CHAIN_IDs,
+  convertRelayDataParamsToBytes32,
 } from "../utils";
 import { RelayerClients } from "./RelayerClientHelper";
 import { RelayerConfig } from "./RelayerConfig";
 import { MultiCallerClient } from "../clients";
-import { convertRelayDataParamsToBytes32 } from "../utils/DepositUtils";
 
 const { getAddress } = ethersUtils;
 const { isDepositSpedUp, isMessageEmpty, resolveDepositMessage } = sdkUtils;
@@ -47,7 +50,7 @@ type RepaymentChainProfitability = {
 };
 
 export class Relayer {
-  public readonly relayerAddress: string;
+  public readonly relayerAddress: Address;
   public readonly fillStatus: { [depositHash: string]: number } = {};
   private pendingTxnReceipts: { [chainId: number]: Promise<TransactionResponse[]> } = {};
   private lastLogTime = 0;
@@ -81,7 +84,8 @@ export class Relayer {
       at: "Relayer",
       logger: this.logger,
     });
-    this.relayerAddress = getAddress(relayerAddress);
+    // Hardcode an EVM chain ID, since the relayer address stored here is an EVM address.
+    this.relayerAddress = toAddressType(getAddress(relayerAddress), CHAIN_IDs.MAINNET);
     this.inventoryChainIds =
       this.config.pollingDelay === 0 ? Object.values(clients.spokePoolClients).map(({ chainId }) => chainId) : [];
   }
@@ -101,12 +105,14 @@ export class Relayer {
     }
 
     if (this.config.sendingRebalancesEnabled && this.config.sendingTransactionsEnabled) {
-      await inventoryClient.setL1TokenApprovals();
+      await inventoryClient.setTokenApprovals();
     }
 
     this.logger.debug({
       at: "Relayer::init",
       message: "Completed one-time init.",
+      relayerEvmAddress: this.relayerAddress.toNative(),
+      relayerSvmAddress: tokenClient.relayerSvmAddress.toNative(),
     });
   }
 
@@ -362,7 +368,7 @@ export class Relayer {
         message: "Skipping deposit that is not supported by this relayer version.",
         latestVersionSupported: configStoreClient.configStoreVersion,
         latestInConfigStore: configStoreClient.getConfigStoreVersionForTimestamp(),
-        deposit,
+        deposit: convertRelayDataParamsToBytes32(deposit),
       });
       return ignoreDeposit();
     }
@@ -380,7 +386,7 @@ export class Relayer {
       this.logger.debug({
         at: "Relayer::filterDeposit",
         message: "Skipping deposit from or to disabled chains.",
-        deposit,
+        deposit: convertRelayDataParamsToBytes32(deposit),
         enabledOriginChains: this.config.relayerOriginChains,
         enabledDestinationChains: this.config.relayerDestinationChains,
       });
@@ -395,7 +401,7 @@ export class Relayer {
       deposit.outputToken,
     ].some((address) => {
       try {
-        getAddress(address);
+        address.toEvmAddress();
       } catch {
         return true;
       }
@@ -405,17 +411,17 @@ export class Relayer {
       this.logger.debug({
         at: "Relayer::filterDeposit",
         message: `Skipping ${srcChain} deposit due to invalid address.`,
-        deposit,
+        deposit: convertRelayDataParamsToBytes32(deposit),
       });
       return ignoreDeposit();
     }
 
-    if (addressFilter?.has(getAddress(depositor)) || addressFilter?.has(getAddress(recipient))) {
+    if (addressFilter?.has(getAddress(depositor.toNative())) || addressFilter?.has(getAddress(recipient.toNative()))) {
       this.logger.debug({
         at: "Relayer::filterDeposit",
         message: `Ignoring ${srcChain} deposit destined for ${dstChain}.`,
-        depositor,
-        recipient,
+        depositor: depositor.toNative(),
+        recipient: recipient.toNative(),
         txnRef: deposit.txnRef,
       });
       return ignoreDeposit();
@@ -424,12 +430,12 @@ export class Relayer {
     // Skip any L1 tokens that are not specified in the config.
     // If relayerTokens is an empty list, we'll assume that all tokens are supported.
     const l1Token = this.clients.inventoryClient.getL1TokenAddress(inputToken, originChainId);
-    if (relayerTokens.length > 0 && !relayerTokens.includes(l1Token)) {
+    if (relayerTokens.length > 0 && !relayerTokens.some((token) => token.eq(l1Token))) {
       this.logger.debug({
         at: "Relayer::filterDeposit",
         message: "Skipping deposit for unwhitelisted token",
-        deposit,
-        l1Token,
+        deposit: convertRelayDataParamsToBytes32(deposit),
+        l1Token: l1Token.toNative(),
       });
       return ignoreDeposit();
     }
@@ -441,7 +447,7 @@ export class Relayer {
         message: "Skipping deposit including in-protocol token swap.",
         originChainId,
         destinationChainId,
-        outputToken: deposit.outputToken,
+        outputToken: deposit.outputToken.toNative(),
         txnRef: deposit.txnRef,
         notificationPath: "across-unprofitable-fills",
       });
@@ -455,7 +461,7 @@ export class Relayer {
         at: "Relayer::filterDeposit",
         message: `Skipping ${srcChain} deposit due to uncertain fill amount.`,
         destinationChainId,
-        outputToken: deposit.outputToken,
+        outputToken: deposit.outputToken.toNative(),
         txnRef: deposit.txnRef,
       });
       return ignoreDeposit();
@@ -467,18 +473,18 @@ export class Relayer {
         at: "Relayer::filterDeposit",
         message: "Skipping fill for deposit with message",
         depositUpdated: isDepositSpedUp(deposit),
-        deposit,
+        deposit: convertRelayDataParamsToBytes32(deposit),
       });
       return ignoreDeposit();
     }
 
     // Skip deposits that contain invalid fills from the same relayer. This prevents potential corrupted data from
     // making the same relayer fill a deposit multiple times.
-    if (!acceptInvalidFills && invalidFills.some((fill) => fill.relayer === this.relayerAddress)) {
+    if (!acceptInvalidFills && invalidFills.some((fill) => fill.relayer.eq(this.relayerAddress))) {
       this.logger.error({
         at: "Relayer::filterDeposit",
         message: "👨‍👧‍👦 Skipping deposit with invalid fills from the same relayer",
-        deposit,
+        deposit: convertRelayDataParamsToBytes32(deposit),
         invalidFills,
         destinationChainId,
       });
@@ -521,7 +527,7 @@ export class Relayer {
       return false;
     }
 
-    if (this.fillIsExclusive(deposit) && getAddress(deposit.exclusiveRelayer) !== this.relayerAddress) {
+    if (this.fillIsExclusive(deposit) && !deposit.exclusiveRelayer.eq(this.relayerAddress)) {
       return false;
     }
 
@@ -537,9 +543,9 @@ export class Relayer {
           at: "Relayer::filterDeposit",
           message: "😱 Skipping deposit with greater unfilled amount than API suggested limit",
           limit,
-          l1Token,
+          l1Token: l1Token.toNative(),
           depositId: depositId.toString(),
-          inputToken,
+          inputToken: inputToken.toNative(),
           inputAmount,
           originChainId,
           txnRef: deposit.txnRef,
@@ -654,7 +660,7 @@ export class Relayer {
     const commitment = deposits.reduce((acc, deposit) => {
       const fill = spokePoolClients[deposit.destinationChainId]
         ?.getFillsForDeposit(deposit)
-        ?.find((f) => f.relayer === this.relayerAddress);
+        ?.find((f) => f.relayer.eq(this.relayerAddress));
       if (!isDefined(fill)) {
         return acc;
       }
@@ -825,7 +831,7 @@ export class Relayer {
     }
 
     // If depositor is on the slow deposit list, then send a zero fill to initiate a slow relay and return early.
-    if (slowDepositors?.includes(depositor)) {
+    if (slowDepositors?.some((slowDepositor) => depositor.eq(slowDepositor))) {
       if (fillStatus === FillStatus.Unfilled && !this.fillIsExclusive(deposit)) {
         this.logger.debug({
           at: "Relayer::evaluateFill",
@@ -841,7 +847,7 @@ export class Relayer {
     // is at least that old before filling it. This is mainly useful on chains with long block times,
     // where there is a high chance of fill collisions in the first blocks after a deposit is made.
     const minFillTime = this.config.minFillTime?.[destinationChainId] ?? 0;
-    if (minFillTime > 0 && deposit.exclusiveRelayer !== this.relayerAddress) {
+    if (minFillTime > 0 && !deposit.exclusiveRelayer.eq(this.relayerAddress)) {
       const originSpoke = spokePoolClients[originChainId];
       let avgBlockTime;
       if (isEVMSpokePoolClient(originSpoke)) {
@@ -943,7 +949,9 @@ export class Relayer {
    * @returns A string identifying the deposit in a BatchLPFees object.
    */
   getLPFeeKey(relayData: Pick<Deposit, "originChainId" | "inputToken" | "inputAmount" | "quoteTimestamp">): string {
-    return `${relayData.originChainId}-${relayData.inputToken}-${relayData.inputAmount}-${relayData.quoteTimestamp}`;
+    return `${relayData.originChainId}-${relayData.inputToken.toBytes32()}-${relayData.inputAmount}-${
+      relayData.quoteTimestamp
+    }`;
   }
 
   /**
@@ -1133,7 +1141,7 @@ export class Relayer {
       this.logger.debug({
         at: "Relayer::requestSlowFill",
         message: "Prevent requesting slow fill request from chain that forces origin chain repayment or to lite chain.",
-        deposit,
+        deposit: convertRelayDataParamsToBytes32(deposit),
       });
       return;
     }
@@ -1144,7 +1152,7 @@ export class Relayer {
       this.logger[this.config.sendingRelaysEnabled ? "warn" : "debug"]({
         at: "Relayer::requestSlowFill",
         message: "Suppressing slow fill request for deposit with message.",
-        deposit,
+        deposit: convertRelayDataParamsToBytes32(deposit),
       });
       return;
     }
@@ -1203,7 +1211,7 @@ export class Relayer {
       this.logger.warn({
         at: "Relayer::fillRelay",
         message: "Suppressed fill for deposit that forces origin chain repayment but repaymentChainId != originChainId",
-        deposit,
+        deposit: convertRelayDataParamsToBytes32(deposit),
         repaymentChainId,
       });
       return;
@@ -1212,7 +1220,7 @@ export class Relayer {
     this.logger.debug({
       at: "Relayer::fillRelay",
       message: `Filling v3 deposit ${deposit.depositId.toString()} with repayment on ${repaymentChainId}.`,
-      deposit,
+      deposit: convertRelayDataParamsToBytes32(deposit),
       repaymentChainId,
       realizedLpFeePct,
     });
@@ -1223,7 +1231,7 @@ export class Relayer {
         ? [
             "fillRelay",
             "",
-            [convertRelayDataParamsToBytes32(deposit), repaymentChainId, toBytes32(this.relayerAddress)],
+            [convertRelayDataParamsToBytes32(deposit), repaymentChainId, this.relayerAddress.toBytes32()],
           ]
         : [
             "fillRelayWithUpdatedDeposit",
@@ -1231,9 +1239,9 @@ export class Relayer {
             [
               convertRelayDataParamsToBytes32(deposit),
               repaymentChainId,
-              toBytes32(this.relayerAddress),
+              this.relayerAddress.toBytes32(),
               deposit.updatedOutputAmount,
-              toBytes32(deposit.updatedRecipient),
+              deposit.updatedRecipient.toBytes32(),
               deposit.updatedMessage,
               deposit.speedUpSignature,
             ],
@@ -1281,7 +1289,7 @@ export class Relayer {
    */
   protected async resolveRepaymentChain(
     deposit: DepositWithBlock,
-    hubPoolToken: string,
+    hubPoolToken: EvmAddress,
     repaymentFees: RepaymentFee[]
   ): Promise<{
     repaymentChainId?: number;
@@ -1359,7 +1367,7 @@ export class Relayer {
         const profitabilityResult = await profitClient.getFillProfitabilityWithOptimalGas(
           deposit,
           lpFeePct,
-          hubPoolToken,
+          hubPoolToken.toNative(),
           preferredChainId,
           true // useOptimalGas = true
         );
@@ -1545,23 +1553,28 @@ export class Relayer {
       const chainId = Number(_chainId);
       mrkdwn += `*Shortfall on ${getNetworkName(chainId)}:*\n`;
       Object.entries(shortfallForChain).forEach(([token, { shortfall, balance, needed, deposits }]) => {
-        const { symbol, formatter } = this.formatAmount(chainId, token);
+        const { symbol, formatter } = this.formatAmount(chainId, toAddressType(token, chainId));
         let crossChainLog = "";
         if (this.clients.inventoryClient.isInventoryManagementEnabled() && chainId !== hubChainId) {
           // Shortfalls are mapped to deposit output tokens so look up output token in token symbol map.
-          const l1Token = this.clients.inventoryClient.getL1TokenAddress(token, chainId);
+          const l1Token = this.clients.inventoryClient.getL1TokenAddress(toAddressType(token, chainId), chainId);
           const outstandingCrossChainTransferAmount =
             this.clients.inventoryClient.crossChainTransferClient.getOutstandingCrossChainTransferAmount(
               this.relayerAddress,
               chainId,
               l1Token,
-              token
+              toAddressType(token, chainId)
             );
           crossChainLog = outstandingCrossChainTransferAmount.gt(0)
             ? " There is " +
               formatter(
                 this.clients.inventoryClient.crossChainTransferClient
-                  .getOutstandingCrossChainTransferAmount(this.relayerAddress, chainId, l1Token, token)
+                  .getOutstandingCrossChainTransferAmount(
+                    this.relayerAddress,
+                    chainId,
+                    l1Token,
+                    toAddressType(token, chainId)
+                  )
                   // TODO: Add in additional l2Token param here once we can specify it
                   .toString()
               ) +
@@ -1586,7 +1599,7 @@ export class Relayer {
 
   private formatAmount(
     chainId: number,
-    tokenAddress: string
+    tokenAddress: Address
   ): { symbol: string; decimals: number; formatter: (amount: string) => string } {
     const { symbol, decimals } = this.clients.hubPoolClient.getTokenInfoForAddress(tokenAddress, chainId);
     return { symbol, decimals, formatter: createFormatFunction(2, 4, false, decimals) };
@@ -1693,18 +1706,21 @@ export class Relayer {
     );
     const srcChain = getNetworkName(deposit.originChainId);
     const dstChain = getNetworkName(deposit.destinationChainId);
-    const depositor = blockExplorerLink(deposit.depositor, deposit.originChainId);
+    const depositor = blockExplorerLink(deposit.depositor.toNative(), deposit.originChainId);
     const inputAmount = createFormatFunction(2, 4, false, decimals)(deposit.inputAmount.toString());
+
+    const { symbol: outputTokenSymbol, decimals: outputTokenDecimals } =
+      this.clients.hubPoolClient.getTokenInfoForAddress(deposit.outputToken, deposit.destinationChainId);
 
     let msg = `Relayed depositId ${deposit.depositId.toString()} from ${srcChain} to ${dstChain} of ${inputAmount} ${symbol}`;
     const realizedLpFeePct = formatFeePct(_realizedLpFeePct);
-    const _totalFeePct = deposit.inputAmount
+    const adjustedInputAmount = sdkUtils.ConvertDecimals(decimals, outputTokenDecimals)(deposit.inputAmount);
+    const _totalFeePct = adjustedInputAmount
       .sub(deposit.outputAmount)
       .mul(fixedPointAdjustment)
-      .div(deposit.inputAmount);
+      .div(adjustedInputAmount);
     const totalFeePct = formatFeePct(_totalFeePct);
-    const { symbol: outputTokenSymbol, decimals: outputTokenDecimals } =
-      this.clients.hubPoolClient.getTokenInfoForAddress(deposit.outputToken, deposit.destinationChainId);
+
     const _outputAmount = createFormatFunction(2, 4, false, outputTokenDecimals)(deposit.outputAmount.toString());
     msg +=
       ` and output ${_outputAmount} ${outputTokenSymbol}, with depositor ${depositor}.` +

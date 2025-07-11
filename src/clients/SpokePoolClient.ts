@@ -3,7 +3,7 @@ import { ChildProcess, spawn } from "child_process";
 import { Contract } from "ethers";
 import { clients, utils as sdkUtils } from "@across-protocol/sdk";
 import { Log, DepositWithBlock } from "../interfaces";
-import { CHAIN_MAX_BLOCK_LOOKBACK, RELAYER_DEFAULT_SPOKEPOOL_LISTENER } from "../common/Constants";
+import { CHAIN_MAX_BLOCK_LOOKBACK, RELAYER_SPOKEPOOL_LISTENER_EVM } from "../common/Constants";
 import {
   EventSearchConfig,
   getNetworkName,
@@ -11,7 +11,6 @@ import {
   MakeOptional,
   winston,
   getRelayEventKey,
-  getMessageHash,
   spreadEventWithBlockNumber,
 } from "../utils";
 import { EventsAddedMessage, EventRemovedMessage } from "../utils/SuperstructUtils";
@@ -69,7 +68,7 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
     super(logger, spokePool, hubPoolClient, chainId, deploymentBlock, eventSearchConfig);
 
     this.chain = getNetworkName(chainId);
-    this.indexerPath = opts.path ?? RELAYER_DEFAULT_SPOKEPOOL_LISTENER;
+    this.indexerPath = opts.path ?? RELAYER_SPOKEPOOL_LISTENER_EVM;
 
     this.pendingBlockNumber = deploymentBlock;
     this.pendingCurrentTime = 0;
@@ -100,7 +99,7 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
     this.worker.on("exit", (code, signal) => this.childExit(code, signal));
     this.worker.on("message", (message) => this.indexerUpdate(message));
     this.logger.debug({
-      at: "SpokePoolClient#startWorker",
+      at: "IndexedSpokePoolClient#startWorker",
       message: `Spawned ${this.chain} SpokePool indexer.`,
       args: this.worker.spawnargs,
     });
@@ -111,7 +110,7 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
       this.worker.disconnect();
     } else {
       this.logger.warn({
-        at: "SpokePoolClient#stopWorker",
+        at: "IndexedSpokePoolClient#stopWorker",
         message: `Skipped disconnecting on ${this.chain} SpokePool listener (already disconnected).`,
       });
     }
@@ -121,7 +120,7 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
       this.worker.kill("SIGKILL");
     } else {
       this.logger.warn({
-        at: "SpokePoolClient#stopWorker",
+        at: "IndexedSpokePoolClient#stopWorker",
         message: `Skipped SIGKILL on ${this.chain} SpokePool listener (already exited).`,
         exitCode,
       });
@@ -129,19 +128,19 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
   }
 
   /**
-   * The worker process has exited. Future: Optionally restart it based on the exit code.
+   * The worker process has exited. Future: Optionally restart it.
    * See also: https://nodejs.org/api/child_process.html#event-exit
    * @param code Optional exit code.
    * @param signal Optional signal resulting in termination.
    * @returns void
    */
-  protected childExit(code?: number, signal?: string): void {
+  private childExit(code?: number, signal?: string): void {
     if (code === 0) {
       return;
     }
 
     this.logger[signal === "SIGKILL" ? "debug" : "warn"]({
-      at: "SpokePoolClient#childExit",
+      at: "IndexedSpokePoolClient#childExit",
       message: `${this.chain} SpokePool listener exited.`,
       code,
       signal,
@@ -153,7 +152,7 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
    * @param rawMessage Message to be parsed.
    * @returns void
    */
-  protected indexerUpdate(rawMessage: unknown): void {
+  private indexerUpdate(rawMessage: unknown): void {
     assert(typeof rawMessage === "string", `Unexpected ${this.chain} message data type`);
 
     const message = JSON.parse(rawMessage);
@@ -176,7 +175,7 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
       );
 
       this.logger.debug({
-        at: "SpokePoolClient#indexerUpdate",
+        at: "IndexedSpokePoolClient#indexerUpdate",
         message: `Received ${nEvents} ${this.chain} events from indexer.`,
       });
 
@@ -200,7 +199,7 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
    * @param event An Ethers event instance.
    * @returns void
    */
-  protected removeEvent(event: Log): boolean {
+  private removeEvent(event: Log): boolean {
     let removed = false;
     const eventIdx = this._queryableEventNames().indexOf(event.event);
     const pendingEvents = this.pendingEvents[eventIdx];
@@ -223,8 +222,8 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
       pendingEvents.splice(pendingEventIdx, 1);
 
       this.logger.debug({
-        at: "SpokePoolClient#removeEvent",
-        message: `Removed ${this.chain} ${eventName} event for block ${blockNumber}.`,
+        at: "IndexedSpokePoolClient#removeEvent",
+        message: `Removed 1 pre-ingested ${this.chain} ${eventName} event for block ${blockNumber}.`,
         event,
       });
     }
@@ -237,15 +236,12 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
       const { depositId } = event.args;
       assert(isDefined(depositId));
 
-      const depositEvent = {
-        ...spreadEventWithBlockNumber(event),
-        messageHash: event.args.messageHash ?? getMessageHash(event.args.message),
-      } as DepositWithBlock;
-      const depositHash = getRelayEventKey(depositEvent);
+      const spreadEvent = spreadEventWithBlockNumber(event) as DepositWithBlock;
+      const depositHash = getRelayEventKey(spreadEvent);
       if (isDefined(this.depositHashes[depositHash])) {
         delete this.depositHashes[depositHash];
         this.logger.warn({
-          at: "SpokePoolClient#removeEvent",
+          at: "IndexedSpokePoolClient#removeEvent",
           message: `Removed 1 pre-ingested ${this.chain} ${eventName} event.`,
           event,
         });
@@ -259,7 +255,7 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
       // Retaining any remaining event types should be non-critical for relayer operation. They may
       // produce sub-optimal decisions, but should not affect the correctness of relayer operation.
       this.logger.debug({
-        at: "SpokePoolClient#removeEvent",
+        at: "IndexedSpokePoolClient#removeEvent",
         message: `Detected re-org affecting pre-ingested ${this.chain} ${eventName} events. Ignoring.`,
         transactionHash,
         blockHash,
@@ -269,7 +265,7 @@ export class IndexedSpokePoolClient extends clients.EVMSpokePoolClient {
     return removed;
   }
 
-  protected async _update(eventsToQuery: string[]): Promise<clients.SpokePoolUpdate> {
+  override async _update(eventsToQuery: string[]): Promise<clients.SpokePoolUpdate> {
     if (this.pendingBlockNumber === this.deploymentBlock) {
       return { success: false, reason: clients.UpdateFailureReason.NotReady };
     }

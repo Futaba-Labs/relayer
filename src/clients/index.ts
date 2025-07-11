@@ -2,11 +2,12 @@ import { clients } from "@across-protocol/sdk";
 
 export type SpokePoolClient = clients.SpokePoolClient;
 export type EVMSpokePoolClient = clients.EVMSpokePoolClient;
+export type SVMSpokePoolClient = clients.SVMSpokePoolClient;
 export type SpokePoolUpdate = clients.SpokePoolUpdate;
 export const { EVMSpokePoolClient, SpokePoolClient, SVMSpokePoolClient } = clients;
 
 export { IndexedSpokePoolClient, SpokePoolClientMessage } from "./SpokePoolClient";
-export { EnhancedSpokePoolClient } from "./EnhancedSpokePoolClient";
+
 export class BundleDataClient extends clients.BundleDataClient.BundleDataClient {}
 
 export * from "./BalanceAllocator";

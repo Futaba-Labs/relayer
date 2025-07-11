@@ -11,7 +11,6 @@ import {
   TryMulticallClient,
 } from "../clients";
 import { IndexedSpokePoolClient, IndexerOpts } from "../clients/SpokePoolClient";
-import { EnhancedSpokePoolClient } from "../clients/EnhancedSpokePoolClient";
 import {
   Clients,
   constructClients,
@@ -20,7 +19,17 @@ import {
   updateClients,
 } from "../common";
 import { SpokePoolClientsByChain } from "../interfaces";
-import { getBlockForTimestamp, getCurrentTime, getProvider, getRedisCache, Signer, SpokePool } from "../utils";
+import {
+  getBlockForTimestamp,
+  getCurrentTime,
+  getProvider,
+  getRedisCache,
+  Signer,
+  SpokePool,
+  EvmAddress,
+  SvmAddress,
+  getSvmSignerFromEvmSigner,
+} from "../utils";
 import { RelayerConfig } from "./RelayerConfig";
 import { AdapterManager, CrossChainTransferClient } from "../clients/bridges";
 
@@ -37,10 +46,8 @@ async function indexedSpokePoolClient(
   baseSigner: Signer,
   hubPoolClient: HubPoolClient,
   chainId: number,
-  opts: IndexerOpts & { lookback: number; blockRange: number },
-  enableBackwardSearch = false,
-  chainConfig?: any
-): Promise<IndexedSpokePoolClient | EnhancedSpokePoolClient> {
+  opts: IndexerOpts & { lookback: number; blockRange: number }
+): Promise<IndexedSpokePoolClient> {
   const { logger } = hubPoolClient;
 
   // Set up Spoke signers and connect them to spoke pool contract objects.
@@ -54,38 +61,19 @@ async function indexedSpokePoolClient(
     getBlockForTimestamp(chainId, getCurrentTime() - opts.lookback, blockFinder, redis),
   ]);
 
-  const spokePoolContract = SpokePool.connect(spokePoolAddr, signer);
+  const spokePoolContract = SpokePool.connect(spokePoolAddr.toNative(), signer);
   const eventSearchConfig = { from, maxLookBack: opts.blockRange };
 
-  if (enableBackwardSearch) {
-    const spokePoolClient = new EnhancedSpokePoolClient(
-      logger,
-      spokePoolContract,
-      hubPoolClient,
-      chainId,
-      activationBlock,
-      eventSearchConfig,
-      opts
-    );
-
-    // Set chain-specific configuration if provided
-    if (chainConfig) {
-      spokePoolClient.setChainConfig(chainConfig);
-    }
-
-    return spokePoolClient;
-  } else {
-    const spokePoolClient = new IndexedSpokePoolClient(
-      logger,
-      spokePoolContract,
-      hubPoolClient,
-      chainId,
-      activationBlock,
-      eventSearchConfig,
-      opts
-    );
-    return spokePoolClient;
-  }
+  const spokePoolClient = new IndexedSpokePoolClient(
+    logger,
+    spokePoolContract,
+    hubPoolClient,
+    chainId,
+    activationBlock,
+    eventSearchConfig,
+    opts
+  );
+  return spokePoolClient;
 }
 
 export async function constructRelayerClients(
@@ -112,8 +100,6 @@ export async function constructRelayerClients(
       : undefined;
 
   let spokePoolClients: SpokePoolClientsByChain;
-  console.log("config.isBackwardSearchEnabledForChain(chainId)", config.isBackwardSearchEnabledForChain(1));
-  console.log("config.getBackwardSearchConfigForChain(chainId)", config.getBackwardSearchConfigForChain(1));
 
   if (config.externalListener) {
     spokePoolClients = Object.fromEntries(
@@ -124,17 +110,7 @@ export async function constructRelayerClients(
           path: config.listenerPath[chainId],
         };
 
-        return [
-          chainId,
-          await indexedSpokePoolClient(
-            baseSigner,
-            hubPoolClient,
-            chainId,
-            opts,
-            config.isBackwardSearchEnabledForChain(chainId),
-            config.getBackwardSearchConfigForChain(chainId)
-          ),
-        ];
+        return [chainId, await indexedSpokePoolClient(baseSigner, hubPoolClient, chainId, opts)];
       })
     );
   } else {
@@ -160,7 +136,14 @@ export async function constructRelayerClients(
     ...config.relayerTokens,
     ...Object.keys(config?.inventoryConfig?.tokenConfig ?? {}),
   ]);
-  const tokenClient = new TokenClient(logger, signerAddr, spokePoolClients, hubPoolClient, relayerTokens);
+  const tokenClient = new TokenClient(
+    logger,
+    EvmAddress.from(signerAddr),
+    SvmAddress.from(getSvmSignerFromEvmSigner(baseSigner).publicKey.toBase58()),
+    spokePoolClients,
+    hubPoolClient,
+    relayerTokens.map((token) => (typeof token === "string" ? EvmAddress.from(token) : token))
+  );
 
   // If `relayerDestinationChains` is a non-empty array, then copy its value, otherwise default to all chains.
   const enabledChainIds = (
@@ -173,13 +156,13 @@ export async function constructRelayerClients(
     hubPoolClient,
     spokePoolClients,
     enabledChainIds,
-    signerAddr,
+    EvmAddress.from(signerAddr),
     config.minRelayerFeePct,
     config.debugProfitability,
     config.relayerGasMultiplier,
     config.relayerMessageGasMultiplier,
     config.relayerGasPadding,
-    relayerTokens
+    relayerTokens.map((token) => (typeof token === "string" ? EvmAddress.from(token) : token))
   );
   await profitClient.update();
 
@@ -188,7 +171,7 @@ export async function constructRelayerClients(
     logger,
     spokePoolClients,
     hubPoolClient,
-    monitoredAddresses.filter(() => sdkUtils.isDefined)
+    monitoredAddresses.filter(() => sdkUtils.isDefined).map((addr) => EvmAddress.from(addr))
   );
 
   const bundleDataClient = new BundleDataClient(
@@ -207,7 +190,7 @@ export async function constructRelayerClients(
   );
 
   const inventoryClient = new InventoryClient(
-    signerAddr,
+    EvmAddress.from(signerAddr),
     logger,
     config.inventoryConfig,
     tokenClient,

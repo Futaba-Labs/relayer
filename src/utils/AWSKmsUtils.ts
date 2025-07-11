@@ -19,7 +19,7 @@ export function getAWSKmsSigner(
   provider?: ethers.providers.Provider
 ): KmsEthersSigner {
   validateAWSKmsConfig(keyId, region);
-  
+
   const kmsClientConfig: any = {
     region,
   };
@@ -58,19 +58,19 @@ export function validateAWSKmsConfig(keyId?: string, region?: string): void {
   if (!keyId) {
     throw new Error("AWS_KMS_KEY_ID environment variable is required for aws-kms wallet type");
   }
-  
+
   if (!region) {
     throw new Error("AWS_KMS_REGION environment variable is required for aws-kms wallet type");
   }
-  
+
   // Validate key ID format (ARN or key ID)
   const arnPattern = /^arn:aws:kms:[a-z0-9-]+:\d{12}:key\/[a-f0-9-]+$/;
   const keyIdPattern = /^[a-f0-9-]+$/;
-  
+
   if (!arnPattern.test(keyId) && !keyIdPattern.test(keyId)) {
     throw new Error("Invalid AWS KMS key ID format. Must be either ARN or key ID.");
   }
-  
+
   Logger.debug({
     at: "AWSKmsUtils#validateAWSKmsConfig",
     message: "AWS KMS configuration validated",

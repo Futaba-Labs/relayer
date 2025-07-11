@@ -1,6 +1,15 @@
 import { SpokePoolClient } from "../clients";
-import { EnhancedSpokePoolClient } from "../clients/EnhancedSpokePoolClient";
+import { RelayData } from "../interfaces";
 
 export interface SpokePoolClientsByChain {
-  [chainId: number]: SpokePoolClient | EnhancedSpokePoolClient;
+  [chainId: number]: SpokePoolClient;
+}
+
+export interface ConvertedRelayData
+  extends Omit<RelayData, "depositor" | "recipient" | "inputToken" | "outputToken" | "exclusiveRelayer"> {
+  depositor: string;
+  recipient: string;
+  inputToken: string;
+  outputToken: string;
+  exclusiveRelayer: string;
 }
