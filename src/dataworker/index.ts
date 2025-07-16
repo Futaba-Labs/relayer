@@ -139,10 +139,11 @@ export async function runDataworker(_logger: winston.Logger, baseSigner: Signer)
 
     if (config.proposerEnabled) {
       if (config.sendingTransactionsEnabled) {
+        const svmSigner = getSvmSignerFromEvmSigner(baseSigner);
         const tokenClient = new TokenClient(
           logger,
           EvmAddress.from(await baseSigner.getAddress()),
-          SvmAddress.from(getSvmSignerFromEvmSigner(baseSigner).publicKey.toBase58()),
+          SvmAddress.from(svmSigner.publicKey.toBase58()),
           {}, // SpokePoolClients not required
           clients.hubPoolClient
         );

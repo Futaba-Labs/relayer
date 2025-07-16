@@ -136,10 +136,12 @@ export async function constructRelayerClients(
     ...config.relayerTokens,
     ...Object.keys(config?.inventoryConfig?.tokenConfig ?? {}),
   ]);
+
+  const svmSigner = getSvmSignerFromEvmSigner(baseSigner);
   const tokenClient = new TokenClient(
     logger,
     EvmAddress.from(signerAddr),
-    SvmAddress.from(getSvmSignerFromEvmSigner(baseSigner).publicKey.toBase58()),
+    SvmAddress.from(svmSigner.publicKey.toBase58()),
     spokePoolClients,
     hubPoolClient,
     relayerTokens.map((token) => (typeof token === "string" ? EvmAddress.from(token) : token))
